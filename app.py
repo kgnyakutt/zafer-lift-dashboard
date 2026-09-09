@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import re
 import streamlit as st
-import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LinearRegression
@@ -127,6 +126,8 @@ def yapay_zeka_egit(df):
     
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
     sc = StandardScaler()
+    
+    # 2. Derece Polinom Regresyonu kullanımı
     poly = PolynomialFeatures(degree=2, include_bias=False)
     regressor = LinearRegression()
     
@@ -152,8 +153,8 @@ try:
     if secilen_tezgah != "Tümü": df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
     if secilen_operator != "Tümü": df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
 
-    # SEKMELER
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "📈 Süre Dağılımı", "🤖 Yapay Zeka Tahmini"])
+    # SEKMELER (Histogram çıkartıldı, 3 sekme kaldı)
+    tab1, tab2, tab3 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "🤖 Yapay Zeka Tahmini"])
     
     with tab1:
         st.subheader("Ürün Çeşidi Bazında Üretim Özeti")
@@ -177,15 +178,6 @@ try:
             st.dataframe(op_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
 
     with tab3:
-        st.subheader("Sipariş Teslim Süreleri Dağılımı (Histogram)")
-        if not df_filtred.empty and not df_filtred["Teslim Süresi (Gün)"].dropna().empty:
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.hist(df_filtred["Teslim Süresi (Gün)"].dropna(), bins=8, color='steelblue', edgecolor='black')
-            ax.set_title("Teslim Süreleri Dağılımı")
-            ax.set_xlabel("Gün"); ax.set_ylabel("Frekans")
-            st.pyplot(fig)
-
-    with tab4:
         st.subheader("🔮 Makine Öğrenmesi ile Teslim Süresi Tahmini")
         st.markdown("Bu modül, geçmiş sipariş verilerinizi öğrenerek **2. Derece Polinom Regresyonu** ile yeni siparişlerinizin fabrikadan kaç günde çıkacağını tahmin eder.")
         
