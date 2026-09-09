@@ -1,7 +1,13 @@
 import pandas as pd
+import numpy as np
 import re
 import streamlit as st
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+import warnings
+warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması
 st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layout="wide")
@@ -9,35 +15,47 @@ st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layou
 st.title("🚀 Zafer Lift Makine - Üretim Kapasitesi ve Operatör Performans Panosu")
 st.markdown("Bu pano, şirket içi pilot veriler baz alınarak Python altyapısıyla dinamik olarak oluşturulmuştur.")
 
-# --- KENAR ÇUBUĞU (SİDEBAR) DOSYA YÜKLEME ALANI ---
+# --- ZORLUK HARİTASI (GLOBAL) ---
+ZORLUK_HARITASI = {
+    "EYP1Ç": 1.0, "HYM2": 1.0, "HYM1": 1.0, "HYM2EAP": 1.0, "HR": 1.0,
+    "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
+    "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
+    "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
+    "EYP1A": 1.0, "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
+    "DÜZRAMPA": 1.0, "MENTEŞELİRAMPA": 2.0, "MENLİFT": 2.5, 
+    "1MAKASLI": 3.0, "2MAKASLI": 4.5, "3MAKASLI": 6.0,
+    "1KOLONLU": 3.5, "2KOLONLU": 5.0, "4KOLONLU": 8.0,
+    "ENGELLİRAMPASI": 1.0
+}
+
+MAKSIMUM_CARPAN_TONAJ = 2.0   
+MAKSIMUM_CARPAN_M2 = 1.3       
+MAKSIMUM_CARPAN_TEKNIK = 1.5   
+
+# --- KENAR ÇUBUĞU ---
 st.sidebar.header("📁 Veri Yönetimi")
 yuklenen_dosya = st.sidebar.file_uploader("Excel Dosyası Yükle (.xlsx)", type=["xlsx"])
 
-# Veri Okuma ve İşleme Fonksiyonu
+# --- VERİ İŞLEME ---
 @st.cache_data
 def veri_isle(dosya_kaynagi):
     def urun_normalize(deger):
-        if pd.isna(deger):
-            return deger
+        if pd.isna(deger): return deger
         s = str(deger).strip().upper()
-        s = re.sub(r'[\s\.\-]+', '', s)
-        return s
+        return re.sub(r'[\s\.\-]+', '', s)
 
     def tonaj_ayikla(deger):
-        if pd.isna(deger) or str(deger).strip() == '':
-            return 1.0
+        if pd.isna(deger) or str(deger).strip() == '': return 1.0
         s = str(deger).lower().replace(',', '.')
         match = re.search(r'[\d\.]+', s)
         if match:
             sayi = float(match.group())
-            if sayi > 50 or "kg" in s:
-                return sayi / 1000.0
+            if sayi > 50 or "kg" in s: return sayi / 1000.0
             return sayi
         return 1.0
 
     def metrekare_ayikla(deger):
-        if pd.isna(deger) or str(deger).strip() == '':
-            return 1.0
+        if pd.isna(deger) or str(deger).strip() == '': return 1.0
         s = str(deger).lower().replace(' ', '').replace(',', '.')
         parcalar = re.split(r'[\*x]', s)
         if len(parcalar) == 2:
@@ -45,179 +63,161 @@ def veri_isle(dosya_kaynagi):
                 en = float(re.search(r'[\d\.]+', parcalar[0]).group())
                 boy = float(re.search(r'[\d\.]+', parcalar[1]).group())
                 return (en * boy) / 1_000_000.0
-            except:
-                pass
+            except: pass
         match = re.search(r'[\d\.]+', s)
-        if match:
-            return float(match.group())
+        if match: return float(match.group())
         return 1.0
 
-    # Excel'i Oku
-    if dosya_kaynagi is not None:
-        df = pd.read_excel(dosya_kaynagi)
-    else:
-        df = pd.read_excel("personel_listesi.xlsx")
+    if dosya_kaynagi is not None: df = pd.read_excel(dosya_kaynagi)
+    else: df = pd.read_excel("personel_listesi.xlsx")
         
     df.columns = df.columns.str.strip()
-
-    # --- YENİ: GEREKSİZ SÜTUNLARI ÇÖPE ATMA (SUBSETTING) ---
-    # Sadece analizde kullanacağımız potansiyel sütunları tanımlıyoruz.
-    hedef_sutunlar = [
-        "Sipariş No", "Ürün Çeşidi", "Çelik Durumu (1/0)", "Tonaj", 
-        "Metrekare", "Metrekare (m2)", "Teknik Puan", "Sipariş Başlangıç", 
-        "Sipariş Çıkış(Boya Hariç)", "Tezgah", "Operatörler", "Üretim Adedi"
-    ]
-    # Yüklenen Excel'de bu sütunlardan hangileri varsa sadece onları al (Seri No, Strok vb. dışarıda kalır)
-    mevcut_sutunlar = [col for col in hedef_sutunlar if col in df.columns]
-    df = df[mevcut_sutunlar]
-    # --------------------------------------------------------
-
-    # Zorunlu sütun kontrolü (Uygulamanın çökmesini engeller)
-    zorunlu_sutunlar = ["Ürün Çeşidi", "Tezgah", "Operatörler", "Üretim Adedi", "Sipariş Başlangıç", "Sipariş Çıkış(Boya Hariç)"]
-    eksik_sutunlar = [s for s in zorunlu_sutunlar if s not in df.columns]
-    if eksik_sutunlar:
-        raise ValueError(f"Yüklenen Excel dosyasında şu zorunlu sütunlar eksik: {', '.join(eksik_sutunlar)}")
+    hedef_sutunlar = ["Sipariş No", "Ürün Çeşidi", "Çelik Durumu (1/0)", "Tonaj", "Metrekare", "Metrekare (m2)", "Teknik Puan", "Sipariş Başlangıç", "Sipariş Çıkış(Boya Hariç)", "Tezgah", "Operatörler", "Üretim Adedi"]
+    df = df[[col for col in hedef_sutunlar if col in df.columns]]
 
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
-    
-    zorluk_haritasi = {
-        "EYP1Ç": 1.0, "HYM2": 1.0, "HYM1": 1.0, "HYM2EAP": 1.0, "HR": 1.0,
-        "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
-        "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
-        "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
-        "EYP1A": 1.0, "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
-        "DÜZRAMPA": 1.0, "MENTEŞELİRAMPA": 2.0, "MENLİFT": 2.5, 
-        "1MAKASLI": 3.0, "2MAKASLI": 4.5, "3MAKASLI": 6.0,
-        "1KOLONLU": 3.5, "2KOLONLU": 5.0, "4KOLONLU": 8.0,
-        "ENGELLİRAMPASI": 1.0
-    }
-    df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].map(zorluk_haritasi).fillna(1.0)
+    df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].map(ZORLUK_HARITASI).fillna(1.0)
 
-    if "Çelik Durumu (1/0)" not in df.columns: 
-        df["Çelik Durumu (1/0)"] = 0.0
-    else: 
-        df["Çelik Durumu (1/0)"] = pd.to_numeric(df["Çelik Durumu (1/0)"], errors='coerce').fillna(0.0)
+    df["Çelik Durumu (1/0)"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0)
     df["Çelik Çarpanı"] = df["Çelik Durumu (1/0)"] + 1.0
 
-    MAKSIMUM_CARPAN_TONAJ = 2.0   
-    MAKSIMUM_CARPAN_M2 = 1.3       
-    MAKSIMUM_CARPAN_TEKNIK = 1.5   
-    
-    if "Tonaj" not in df.columns: 
-        df["Tonaj"] = 1.0
-    else: 
-        df["Tonaj"] = df["Tonaj"].apply(tonaj_ayikla).replace(0, 1.0)
-
+    df["Tonaj"] = df.get("Tonaj", pd.Series([1.0]*len(df))).apply(tonaj_ayikla).replace(0, 1.0)
     min_tonaj, max_tonaj = df["Tonaj"].min(), df["Tonaj"].max()
-    if max_tonaj > min_tonaj:
-        df["Normalize_Tonaj"] = 1.0 + ((df["Tonaj"] - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0)
-    else:
-        df["Normalize_Tonaj"] = 1.0
+    df["Normalize_Tonaj"] = 1.0 if max_tonaj == min_tonaj else 1.0 + ((df["Tonaj"] - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0)
 
-    if "Metrekare (m2)" not in df.columns:
-        if "Metrekare" in df.columns:
-            df["Metrekare (m2)"] = df["Metrekare"].apply(metrekare_ayikla).replace(0, 1.0)
-        else:
-            df["Metrekare (m2)"] = 1.0
-    else: 
-        df["Metrekare (m2)"] = df["Metrekare (m2)"].apply(metrekare_ayikla).replace(0, 1.0)
-
+    if "Metrekare (m2)" not in df.columns and "Metrekare" in df.columns: df["Metrekare (m2)"] = df["Metrekare"]
+    df["Metrekare (m2)"] = df.get("Metrekare (m2)", pd.Series([1.0]*len(df))).apply(metrekare_ayikla).replace(0, 1.0)
+    
     makasli_mask = df["Ürün Çeşidi"].str.lower().str.contains("makaslı", na=False)
     min_m2, max_m2 = (df.loc[makasli_mask, "Metrekare (m2)"].min(), df.loc[makasli_mask, "Metrekare (m2)"].max()) if makasli_mask.any() else (1.0, 1.0)
 
     def m2_normalize_hesapla(row):
-        urun = str(row["Ürün Çeşidi"]).lower()
-        if "makaslı" in urun and max_m2 > min_m2:
+        if "makaslı" in str(row["Ürün Çeşidi"]).lower() and max_m2 > min_m2:
             return 1.0 + ((row["Metrekare (m2)"] - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0)
         return 1.0 
-
     df["Normalize_Metrekare"] = df.apply(m2_normalize_hesapla, axis=1)
     
-    if "Teknik Puan" not in df.columns: 
-        df["Normalize_Teknik"] = 1.0 
-    else: 
-        df["Teknik Puan"] = pd.to_numeric(df["Teknik Puan"], errors='coerce').fillna(1.0)
-        df["Normalize_Teknik"] = 1.0 + ((df["Teknik Puan"] - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
+    df["Teknik Puan"] = pd.to_numeric(df.get("Teknik Puan", 1.0), errors='coerce').fillna(1.0)
+    df["Normalize_Teknik"] = 1.0 + ((df["Teknik Puan"] - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
 
     df["Sipariş Başlangıç Tarihi"] = pd.to_datetime(df["Sipariş Başlangıç"], dayfirst=True, errors='coerce')
     df["Sipariş Çıkış Tarihi"] = pd.to_datetime(df["Sipariş Çıkış(Boya Hariç)"], dayfirst=True, errors='coerce')
     df["Teslim Süresi (Gün)"] = (df["Sipariş Çıkış Tarihi"] - df["Sipariş Başlangıç Tarihi"]).dt.days
 
-    return df
+    # ML Modeli için Operatör Sayısını Hesapla
+    df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
+    df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1)
+    df['Kişi Sayısı'] = df['Kişi Sayısı'].replace(0, 1)
 
+    return df, min_tonaj, max_tonaj, min_m2, max_m2
+
+# --- MAKİNE ÖĞRENMESİ MODELİ (Sadece veri değiştiğinde eğitilir) ---
+@st.cache_resource
+def yapay_zeka_egit(df):
+    X_cols = ["Zorluk Katsayısı", "Normalize_Tonaj", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
+    Y_col = "Teslim Süresi (Gün)"
+    
+    df_model = df.dropna(subset=[Y_col] + X_cols).copy()
+    df_model = df_model[df_model[Y_col] > 0]
+    
+    if len(df_model) < 5: return None, None, None # Veri yetersizse
+    
+    X = df_model[X_cols].values
+    y = df_model[Y_col].values
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+    sc = StandardScaler()
+    poly = PolynomialFeatures(degree=2, include_bias=False)
+    regressor = LinearRegression()
+    
+    X_train_scaled = sc.fit_transform(X_train)
+    X_train_poly = poly.fit_transform(X_train_scaled)
+    regressor.fit(X_train_poly, y_train)
+    
+    return regressor, sc, poly
+
+# --- ANA UYGULAMA ---
 try:
-    df = veri_isle(yuklenen_dosya)
+    df, min_tonaj, max_tonaj, min_m2, max_m2 = veri_isle(yuklenen_dosya)
+    regressor, sc, poly = yapay_zeka_egit(df)
     
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Gelişmiş Filtreleme Paneli")
-    
     secilen_tezgah = st.sidebar.selectbox("Tezgah Seçin", ["Tümü"] + list(df["Tezgah"].dropna().unique()))
     
-    tum_operatorler = set()
-    for ops in df["Operatörler"].dropna().astype(str):
-        for op in ops.split(','):
-            temiz_op = op.strip()
-            if temiz_op:
-                tum_operatorler.add(temiz_op)
-                
+    tum_operatorler = set(op.strip() for ops in df["Operatörler"].dropna() for op in ops.split(',') if op.strip())
     secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + sorted(list(tum_operatorler)))
     
     df_filtred = df.copy()
-    if secilen_tezgah != "Tümü":
-        df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
-        
-    if secilen_operator != "Tümü":
-        df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+    if secilen_tezgah != "Tümü": df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
+    if secilen_operator != "Tümü": df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
 
-    tab1, tab2, tab3 = st.tabs(["📊 Ürün & Yük Analizi", "👷 Operatör Performans", "📈 Histogram Dağılımı"])
+    # SEKMELER
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "📈 Süre Dağılımı", "🤖 Yapay Zeka Tahmini"])
     
     with tab1:
         st.subheader("Ürün Çeşidi Bazında Üretim Özeti")
         if not df_filtred.empty:
-            grup_ozet = df_filtred.groupby(["Ürün Çeşidi", "Zorluk Katsayısı"]).agg({
-                "Üretim Adedi": ["sum", "mean"],
-                "Teslim Süresi (Gün)": "mean",
-                "Sipariş No": "count" if "Sipariş No" in df_filtred.columns else lambda x: len(x)
-            }).reset_index()
-            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı", "Toplam Üretim", "Ortalama Üretim", "Ortalama Teslim Süresi (Gün)", "İşlenen Sipariş Sayısı"]
+            grup_ozet = df_filtred.groupby(["Ürün Çeşidi", "Zorluk Katsayısı"]).agg({"Üretim Adedi": ["sum", "mean"], "Teslim Süresi (Gün)": "mean", "Sipariş No": "count" if "Sipariş No" in df_filtred.columns else lambda x: len(x)}).reset_index()
+            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı", "Toplam", "Ortalama", "Ortalama Süre (Gün)", "Sipariş Sayısı"]
             st.dataframe(grup_ozet, use_container_width=True)
-        else:
-            st.info("Seçilen filtrelere uygun veri bulunamadı.")
 
     with tab2:
         st.subheader("Normalize Edilmiş Operatör Performans Puanları")
         if not df_filtred.empty:
             df_op = df_filtred.copy()
-            df_op['Operatörler'] = df_op['Operatörler'].fillna('').astype(str)
-            df_op['Kişi Sayısı'] = df_op['Operatörler'].str.count(',') + 1
             df_op['Operatörler'] = df_op['Operatörler'].str.split(',')
             df_op = df_op.explode('Operatörler')
             df_op['Operatörler'] = df_op['Operatörler'].str.strip()
             df_op = df_op[df_op['Operatörler'] != '']
-            
             df_op['Toplam Puan'] = (df_op['Üretim Adedi'] * df_op['Zorluk Katsayısı'] * df_op['Normalize_Tonaj'] * df_op['Çelik Çarpanı'] * df_op['Normalize_Metrekare'] * df_op['Normalize_Teknik'])
             df_op['Kişi Başı Puan'] = df_op['Toplam Puan'] / df_op['Kişi Sayısı']
-            
-            operator_ozet = df_op.groupby("Operatörler").agg({"Kişi Başı Puan": "sum", "Üretim Adedi": "sum"}).reset_index()
-            operator_ozet["Kişi Başı Puan"] = round(operator_ozet["Kişi Başı Puan"], 1)
-            operator_ozet.rename(columns={"Üretim Adedi": "Toplam Adet"}, inplace=True)
-            st.dataframe(operator_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
-        else:
-            st.info("Seçilen filtrelere uygun veri bulunamadı.")
+            op_ozet = df_op.groupby("Operatörler").agg({"Kişi Başı Puan": "sum"}).reset_index()
+            op_ozet["Kişi Başı Puan"] = round(op_ozet["Kişi Başı Puan"], 1)
+            st.dataframe(op_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
 
     with tab3:
         st.subheader("Sipariş Teslim Süreleri Dağılımı (Histogram)")
         if not df_filtred.empty and not df_filtred["Teslim Süresi (Gün)"].dropna().empty:
             fig, ax = plt.subplots(figsize=(8, 4))
-            ax.hist(df_filtred["Teslim Süresi (Gün)"].dropna(), bins=8, color='steelblue', edgecolor='black', alpha=0.8)
-            ax.set_title("Seçilen Filtrelere Göre Teslim Süreleri Dağılımı")
-            ax.set_xlabel("Gün")
-            ax.set_ylabel("Frekans")
+            ax.hist(df_filtred["Teslim Süresi (Gün)"].dropna(), bins=8, color='steelblue', edgecolor='black')
+            ax.set_title("Teslim Süreleri Dağılımı")
+            ax.set_xlabel("Gün"); ax.set_ylabel("Frekans")
             st.pyplot(fig)
-        else:
-            st.info("Bu filtre kombinasyonu için çizilebilecek yeterli tarih verisi bulunamadı.")
 
-except ValueError as ve:
-    st.warning(f"⚠️ Dosya Yükleme Hatası: {ve}")
-except Exception as e:
-    st.error(f"Bir hata oluştu: {e}")
+    with tab4:
+        st.subheader("🔮 Makine Öğrenmesi ile Teslim Süresi Tahmini")
+        st.markdown("Bu modül, geçmiş sipariş verilerinizi öğrenerek **2. Derece Polinom Regresyonu** ile yeni siparişlerinizin fabrikadan kaç günde çıkacağını tahmin eder.")
+        
+        if regressor is None:
+            st.warning("Modeli eğitmek için sisteme yüklenen Excel'de yeterli sipariş geçmişi (Teslim Süresi hesaplanabilen kayıt) bulunamadı.")
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                input_urun = st.selectbox("Ürün Çeşidi", list(ZORLUK_HARITASI.keys()))
+                input_tonaj = st.number_input("Tonaj (Ton)", value=1.0, min_value=0.1)
+                input_m2 = st.number_input("Ebat (Metrekare)", value=1.0, min_value=0.1)
+            with col2:
+                input_kisi = st.number_input("Ekipteki Operatör Sayısı", min_value=1, value=1)
+                input_teknik = st.slider("Teknik Zorluk Puanı", min_value=1.0, max_value=10.0, value=1.0)
+                input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
+                
+            if st.button("🚀 Üretim Süresini Tahmin Et", type="primary"):
+                # Arka plan normalizasyonu
+                zorluk = ZORLUK_HARITASI.get(input_urun, 1.0)
+                norm_tonaj = 1.0 + ((input_tonaj - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0) if max_tonaj > min_tonaj else 1.0
+                norm_m2 = 1.0 + ((input_m2 - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if "MAKASLI" in input_urun and max_m2 > min_m2 else 1.0
+                norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
+                celik_carp = input_celik + 1.0
+                
+                # Tahmin
+                ham_veri = np.array([[zorluk, norm_tonaj, norm_m2, norm_teknik, celik_carp, input_kisi]])
+                veri_scaled = sc.transform(ham_veri)
+                veri_poly = poly.transform(veri_scaled)
+                tahmini_gun = max(regressor.predict(veri_poly)[0], 1.0)
+                
+                st.success(f"### 🎉 Beklenen Üretim Süresi: **{tahmini_gun:.1f} Gün**")
+                st.info(f"**Model Detayı:** Tahmin işlemi mevcut {len(df.dropna(subset=['Teslim Süresi (Gün)']))} adet geçmiş sipariş verisi baz alınarak hesaplanmıştır.")
+
+except ValueError as ve: st.warning(f"⚠️ Dosya Yükleme Hatası: {ve}")
+except Exception as e: st.error(f"Bir hata oluştu: {e}")
