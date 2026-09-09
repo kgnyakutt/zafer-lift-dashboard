@@ -9,9 +9,13 @@ st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layou
 st.title("🚀 Zafer Lift Makine - Üretim Kapasitesi ve Operatör Performans Panosu")
 st.markdown("Bu pano, şirket içi pilot veriler baz alınarak Python altyapısıyla dinamik olarak oluşturulmuştur.")
 
-# Veri Okuma ve İşleme Fonksiyonu
+# --- KENAR ÇUBUĞU (SİDEBAR) DOSYA YÜKLEME ALANI ---
+st.sidebar.header("📁 Veri Yönetimi")
+yuklenen_dosya = st.sidebar.file_uploader("Excel Dosyası Yükle (.xlsx)", type=["xlsx"])
+
+# Veri Okuma ve İşleme Fonksiyonu (Dosyayı parametre olarak alır)
 @st.cache_data
-def veri_isle():
+def veri_isle(dosya_kaynagi):
     def urun_normalize(deger):
         if pd.isna(deger):
             return deger
@@ -19,16 +23,26 @@ def veri_isle():
         s = re.sub(r'[\s\.\-]+', '', s)
         return s
 
-    df = pd.read_excel("personel_listesi.xlsx")
+    # Eğer kullanıcı dışarıdan dosya yüklediyse onu oku, yoksa varsayılanı kullan
+    if dosya_kaynagi is not None:
+        df = pd.read_excel(dosya_kaynagi)
+    else:
+        df = pd.read_excel("personel_listesi.xlsx")
+        
     df.columns = df.columns.str.strip()
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
     
+    # Zorluk Katsayısı Haritası
     zorluk_haritasi = {
-        "EYP1Ç": 1.0, "HYM2": 1.0, "HYM1": 1.0, "HYM2(EAP)": 1.0, "HR": 1.0,
+        "EYP1Ç": 1.0, "HYM2": 1.0, "HYM1": 1.0, "HYM2EAP": 1.0, "HR": 1.0,
         "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
-        "EYP4": 1.0, "EYP1+S12": 1.0, "EYP1+S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
-        "EEP3": 1.0, "EYP1H": 1.0, "EYP1+A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
-        "EYP1A": 1.0, "PYM157(ÖZEL)": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2+H": 1.0,
+        "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
+        "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
+        "EYP1A": 1.0, "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
+        "DÜZRAMPA": 1.0, "MENTEŞELİRAMPA": 2.0, "MENLİFT": 2.5, 
+        "1MAKASLI": 3.0, "2MAKASLI": 4.5, "3MAKASLI": 6.0,
+        "1KOLONLU": 3.5, "2KOLONLU": 5.0, "4KOLONLU": 8.0,
+        "ENGELLİRAMPASI": 1.0
     }
     df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].map(zorluk_haritasi).fillna(1.0)
 
@@ -78,15 +92,16 @@ def veri_isle():
     return df
 
 try:
-    df = veri_isle()
+    # Veriyi yükleme butonundan alıp fonksiyona yolluyoruz
+    df = veri_isle(yuklenen_dosya)
     
-    # --- KENAR ÇUBUĞU (SİDEBAR) FİLTRELERİ ---
+    st.sidebar.markdown("---")
     st.sidebar.header("🔍 Gelişmiş Filtreleme Paneli")
     
     # 1. Tezgah Filtresi
     secilen_tezgah = st.sidebar.selectbox("Tezgah Seçin", ["Tümü"] + list(df["Tezgah"].dropna().unique()))
     
-    # Tüm operatör isimlerini tekilleştirerek (split edip) liste haline getirelim
+    # Tüm operatör isimlerini toparlayalım
     tum_operatorler = set()
     for ops in df["Operatörler"].dropna().astype(str):
         for op in ops.split(','):
@@ -94,17 +109,15 @@ try:
             if temiz_op:
                 tum_operatorler.add(temiz_op)
                 
-    # 2. Operatör / Kişi Filtresi
+    # 2. Operatör Filtresi
     secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + sorted(list(tum_operatorler)))
     
-    # Filtreleri uygulama mantığı
+    # Filtreleme mantığı
     df_filtred = df.copy()
-    
     if secilen_tezgah != "Tümü":
         df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
         
     if secilen_operator != "Tümü":
-        # Operatörler sütununda seçilen kişinin geçtiği satırları filtrele
         df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
 
     # Ana Sayfa Sekmeleri
@@ -130,7 +143,7 @@ try:
             df_op['Operatörler'] = df_op['Operatörler'].fillna('').astype(str)
             df_op['Kişi Sayısı'] = df_op['Operatörler'].str.count(',') + 1
             df_op['Operatörler'] = df_op['Operatörler'].str.split(',')
-            df_op = df_op.explode('Operatörler')
+            df_op = df_op = df_op.explode('Operatörler')
             df_op['Operatörler'] = df_op['Operatörler'].str.strip()
             df_op = df_op[df_op['Operatörler'] != '']
             
