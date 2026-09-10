@@ -120,7 +120,7 @@ def veri_isle(dosya_kaynagi):
             else: return 1.0
 
     if dosya_kaynagi is not None: df = pd.read_excel(dosya_kaynagi)
-    else: df = pd.read_excel("personel_listesi_kapasiteli.xlsx") 
+    else: df = pd.read_excel("personel_listesi.xlsx") 
         
     df.columns = df.columns.str.strip()
     
