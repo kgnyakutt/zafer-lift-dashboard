@@ -191,8 +191,8 @@ def veri_isle():
         fabrika_medyan_hiz = 1.0
         
     # Operatörün Hız Çarpanı = Kendi Hızı / Fabrika Ortalaması
-    # Uçmaları önlemek için max %75 bonus (1.75), min %50 ceza (0.50) ile sınırlandırıldı.
-    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / fabrika_medyan_hiz).clip(lower=0.50, upper=1.75)
+    # Yeni hali: (En fazla %15 bonus, en fazla %15 ceza)
+df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / fabrika_medyan_hiz).clip(lower=0.85, upper=1.15)
 
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1)
