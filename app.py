@@ -7,6 +7,41 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 import warnings
+import streamlit as st
+# (Diğer importlar...)
+
+# Sayfa Yapılandırması
+st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layout="wide")
+
+# --- GÜVENLİK KİLİDİ ---
+def sifre_kontrol():
+    # Şifre kontrol fonksiyonu
+    def sifre_girildi():
+        # Buradaki "ZaferLift2026*" senin belirleyeceğin şifredir. İstediğin gibi değiştir.
+        if st.session_state["sifre"] == "0228*":
+            st.session_state["sifre_dogru"] = True
+            del st.session_state["sifre"]  # Güvenlik için girilen şifreyi sil
+        else:
+            st.session_state["sifre_dogru"] = False
+
+    if "sifre_dogru" not in st.session_state:
+        st.markdown("### 🔒 Güvenli Giriş")
+        st.text_input("Panele erişmek için şifreyi giriniz:", type="password", on_change=sifre_girildi, key="sifre")
+        return False
+    elif not st.session_state["sifre_dogru"]:
+        st.markdown("### 🔒 Güvenli Giriş")
+        st.text_input("Panele erişmek için şifreyi giriniz:", type="password", on_change=sifre_girildi, key="sifre")
+        st.error("❌ Hatalı Şifre! Lütfen tekrar deneyin.")
+        return False
+    return True
+
+if not sifre_kontrol():
+    st.stop()  # Doğru şifre girilene kadar kodun geri kalanını ASLA çalıştırmaz!
+
+# ==========================================
+# BURADAN İTİBAREN SENİN ESKİ KODUN BAŞLAYACAK
+# st.title("🚀 Zafer Lift Makine...")
+# ... (Geri kalan her şey)
 warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması
