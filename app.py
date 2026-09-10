@@ -6,46 +6,34 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 import warnings
-import streamlit as st
-# (Diğer importlar...)
+warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması
 st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layout="wide")
 
 # --- GÜVENLİK KİLİDİ ---
 def sifre_kontrol():
-    # Şifre kontrol fonksiyonu
     def sifre_girildi():
-        # Buradaki "ZaferLift2026*" senin belirleyeceğin şifredir. İstediğin gibi değiştir.
-        if st.session_state["sifre"] == "0228*":
+        if st.session_state["sifre_kutusu"] == "0228":
             st.session_state["sifre_dogru"] = True
-            del st.session_state["sifre"]  # Güvenlik için girilen şifreyi sil
         else:
             st.session_state["sifre_dogru"] = False
 
-    if "sifre_dogru" not in st.session_state:
-        st.markdown("### 🔒 Güvenli Giriş")
-        st.text_input("Panele erişmek için şifreyi giriniz:", type="password", on_change=sifre_girildi, key="sifre")
-        return False
-    elif not st.session_state["sifre_dogru"]:
-        st.markdown("### 🔒 Güvenli Giriş")
-        st.text_input("Panele erişmek için şifreyi giriniz:", type="password", on_change=sifre_girildi, key="sifre")
+    if st.session_state.get("sifre_dogru", False):
+        return True
+
+    st.markdown("### 🔒 Zafer Lift - Güvenli Giriş")
+    st.text_input("Panele erişmek için şifrenizi girip Enter'a basın:", type="password", on_change=sifre_girildi, key="sifre_kutusu")
+    
+    if "sifre_dogru" in st.session_state and not st.session_state["sifre_dogru"]:
         st.error("❌ Hatalı Şifre! Lütfen tekrar deneyin.")
-        return False
-    return True
+    
+    return False
 
 if not sifre_kontrol():
-    st.stop()  # Doğru şifre girilene kadar kodun geri kalanını ASLA çalıştırmaz!
-
-# ==========================================
-# BURADAN İTİBAREN SENİN ESKİ KODUN BAŞLAYACAK
-# st.title("🚀 Zafer Lift Makine...")
-# ... (Geri kalan her şey)
-warnings.filterwarnings("ignore")
-
-# Sayfa Yapılandırması
-st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layout="wide")
+    st.stop()
 
 st.title("🚀 Zafer Lift Makine - Üretim Kapasitesi ve Operatör Performans Panosu")
 st.markdown("Bu pano, Google Sheets bulut altyapısıyla canlı olarak senkronize edilmiştir.")
@@ -91,7 +79,7 @@ secilen_kategori = st.sidebar.radio(
     ["Tümü (Genel Analiz)", "Makaslı Üretimler (Makaslılar, EYP, EEP vb.)", "Asansör ve Diğerleri (Kolonlu, HYM, Rampa vb.)"]
 )
 
-# --- VERİ İŞLEME (GÜNCELLEMELERİ ANINDA ALMAK İÇİN TTL 5 SANİYE YAPILDI) ---
+# --- VERİ İŞLEME ---
 @st.cache_data(ttl=5)
 def veri_isle():
     sheet_url = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv"
@@ -163,10 +151,8 @@ def veri_isle():
 
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
     
-    if "Tel Fonk" not in df.columns:
-        df["Tel Fonk"] = "Tel"
+    if "Tel Fonk" not in df.columns: df["Tel Fonk"] = "Tel"
     df["Korkuluk Çarpanı"] = df.apply(lambda row: korkuluk_hesapla(row["Tel Fonk"], row["Ürün Çeşidi"]), axis=1)
-    
     df["Ham_Zorluk"] = df["Ürün Çeşidi"].apply(dinamik_zorluk) * df["Korkuluk Çarpanı"]
 
     df["Çelik Durumu (1/0)"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0)
@@ -178,7 +164,6 @@ def veri_isle():
     df["Metrekare (m2)"] = df.get("Metrekare (m2)", pd.Series([1.0]*len(df))).apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df.get("Teknik Puan", 1.0), errors='coerce').fillna(1.0)
     
-    # 1. TARİH VE GÜN HESAPLARI (Tam senin söylediğin gibi)
     df["Sipariş Başlangıç Tarihi"] = pd.to_datetime(df["Sipariş Başlangıç"], dayfirst=True, errors='coerce')
     df["Sipariş Çıkış Tarihi"] = pd.to_datetime(df["Sipariş Çıkış(Boya Hariç)"], dayfirst=True, errors='coerce')
     
@@ -189,11 +174,10 @@ def veri_isle():
     else:
         df["Bekleme Süresi (Gün)"] = 0.0
         
-    # NET SÜRE = Toplam Takvim Günü - Bekleme Süresi (Bekleme varsa süreden düşülür!)
     df["Net Üretim Süresi (Gün)"] = df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]
     df["Net Üretim Süresi (Gün)"] = df["Net Üretim Süresi (Gün)"].apply(lambda x: max(x, 1.0) if not pd.isna(x) else 1.0)
 
-    # 2. ZAMAN VERİMLİLİĞİ VE HIZ HESABI (YENİ VE KUSURSUZ MANTIK)
+    # --- ZAMAN VERİMLİLİĞİ VE HIZ HESABI ---
     min_kap, max_kap = df["Kapasite"].min(), df["Kapasite"].max()
     df["Normalize_Kapasite"] = 1.0 if max_kap == min_kap else 1.0 + ((df["Kapasite"] - min_kap) / (max_kap - min_kap)) * (MAKSIMUM_CARPAN_KAPASITE - 1.0)
     
@@ -213,20 +197,13 @@ def veri_isle():
     else:
         df["Zorluk Katsayısı"] = 1.0
 
-    # Makinenin Kağıt Üstündeki Zorluk/İş Yükü Büyüklüğü
     df["Ham_İş_Yükü"] = df['Zorluk Katsayısı'] * df['Normalize_Kapasite'] * df['Çelik Çarpanı'] * df['Normalize_Metrekare'] * df['Normalize_Teknik']
-    
-    # Hız Faktörü: İş Yükünü Kaç Günde (Net) Erittiği
-    # Not: Net süre ne kadar kısaysa, payda o kadar küçülür ve Hız o kadar fırlar!
     df["Günlük_Hız"] = df["Ham_İş_Yükü"] / df["Net Üretim Süresi (Gün)"]
     
-    # Fabrikanın ortalama çalışma hızını buluyoruz (Denge için)
     fabrika_medyan_hiz = df["Günlük_Hız"].median()
     if pd.isna(fabrika_medyan_hiz) or fabrika_medyan_hiz == 0:
         fabrika_medyan_hiz = 1.0
         
-    # Operatörün Hız Çarpanı = Kendi Hızı / Fabrika Ortalaması
-    # Yeni hali: (En fazla %15 bonus, en fazla %15 ceza)
     df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / fabrika_medyan_hiz).clip(lower=0.85, upper=1.15)
 
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
@@ -235,7 +212,7 @@ def veri_isle():
 
     return df
 
-# --- ÇİFTLİ YAPAY ZEKA MODELİ ---
+# --- ÇİFTLİ YAPAY ZEKA MODELİ VE HATA METRİKLERİ ---
 @st.cache_resource
 def yapay_zeka_egit(df_model):
     X_cols = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
@@ -243,7 +220,7 @@ def yapay_zeka_egit(df_model):
     df_model = df_model.dropna(subset=["Net Üretim Süresi (Gün)", "Bekleme Süresi (Gün)"] + X_cols).copy()
     df_model = df_model[df_model["Net Üretim Süresi (Gün)"] > 0]
     
-    if len(df_model) < 5: return None, None, None, None
+    if len(df_model) < 5: return None, None, None, None, None
     
     X = df_model[X_cols].values
     y_net = df_model["Net Üretim Süresi (Gün)"].values
@@ -254,6 +231,7 @@ def yapay_zeka_egit(df_model):
     
     sc = StandardScaler()
     X_train_scaled = sc.fit_transform(X_train)
+    X_test_scaled = sc.transform(X_test)
     
     rf_net = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
     rf_net.fit(X_train_scaled, y_net_train)
@@ -261,9 +239,20 @@ def yapay_zeka_egit(df_model):
     rf_bekleme = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
     rf_bekleme.fit(X_train_scaled, y_bek_train)
     
+    # HATA METRİKLERİ (MAE, MSE, RMSE)
+    y_net_pred = rf_net.predict(X_test_scaled)
+    y_bek_pred = rf_bekleme.predict(X_test_scaled)
+    
+    metrikler = {
+        "Net_MAE": mean_absolute_error(y_net_test, y_net_pred),
+        "Net_RMSE": np.sqrt(mean_squared_error(y_net_test, y_net_pred)),
+        "Bekleme_MAE": mean_absolute_error(y_bek_test, y_bek_pred),
+        "Bekleme_RMSE": np.sqrt(mean_squared_error(y_bek_test, y_bek_pred)),
+    }
+    
     onem_yuzdeleri = rf_net.feature_importances_ * 100
     
-    return rf_net, rf_bekleme, sc, onem_yuzdeleri
+    return rf_net, rf_bekleme, sc, onem_yuzdeleri, metrikler
 
 # --- SIRALAMA FONKSİYONLARI ---
 def aile_bazli_siralama(urun):
@@ -302,7 +291,7 @@ try:
         st.error("Bu kategoride hiç veri bulunamadı! Lütfen sol menüden başka bir kategori seçin.")
         st.stop()
 
-    rf_net, rf_bekleme, sc, onem_yuzdeleri = yapay_zeka_egit(df_kategori)
+    rf_net, rf_bekleme, sc, onem_yuzdeleri, model_metrikleri = yapay_zeka_egit(df_kategori)
     
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Operatör & Tezgah Filtresi")
@@ -317,16 +306,13 @@ try:
     if secilen_tezgah != "Tümü": df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
     if secilen_operator != "Tümü": df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "🤖 Yapay Zeka Tahmini", "🏭 Fabrika Karakteristiği"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "🤖 Yapay Zeka Tahmini & Atama", "🏭 Fabrika Karakteristiği"])
     
     with tab1:
         st.subheader("Üretim Özeti")
-        if "Makaslı Üretimler" in secilen_kategori:
-            beklenen_urunler = [u for u in ZORLUK_HARITASI.keys() if urun_makasli_mi(u)]
-        elif "Asansör ve Diğerleri" in secilen_kategori:
-            beklenen_urunler = [u for u in ZORLUK_HARITASI.keys() if not urun_makasli_mi(u)]
-        else:
-            beklenen_urunler = list(ZORLUK_HARITASI.keys())
+        if "Makaslı Üretimler" in secilen_kategori: beklenen_urunler = [u for u in ZORLUK_HARITASI.keys() if urun_makasli_mi(u)]
+        elif "Asansör ve Diğerleri" in secilen_kategori: beklenen_urunler = [u for u in ZORLUK_HARITASI.keys() if not urun_makasli_mi(u)]
+        else: beklenen_urunler = list(ZORLUK_HARITASI.keys())
             
         base_df = pd.DataFrame({"Ürün Çeşidi": beklenen_urunler})
         base_df["Katsayı (Normalize 1-10)"] = base_df["Ürün Çeşidi"].map(ZORLUK_HARITASI)
@@ -365,7 +351,7 @@ try:
         st.dataframe(merged_df, use_container_width=True)
 
     with tab2:
-        st.subheader("👷 Operatör Performans Puanları")
+        st.subheader("👷 Operatör Performans Puanları (Gecikmelerden Arındırılmış & Hız Çarpanlı)")
         if not df_filtred.empty:
             df_op = df_filtred.copy()
             df_op['Operatörler'] = df_op['Operatörler'].str.split(',')
@@ -373,7 +359,6 @@ try:
             df_op['Operatörler'] = df_op['Operatörler'].str.strip()
             df_op = df_op[df_op['Operatörler'] != '']
             
-            # Artık çarpanımız global olarak yukarıda hesaplandı (Zaman Verimlilik Çarpanı)
             df_op['Toplam Puan'] = (
                 df_op['Üretim Adedi'] * 
                 df_op['Zorluk Katsayısı'] * 
@@ -384,20 +369,38 @@ try:
                 df_op['Zaman Verimlilik Çarpanı']
             )
             df_op['Kişi Başı Puan'] = df_op['Toplam Puan'] / df_op['Kişi Sayısı']
-            op_ozet = df_op.groupby("Operatörler").agg({"Kişi Başı Puan": "sum"}).reset_index()
+            op_ozet = df_op.groupby("Operatörler").agg({"Kişi Başı Puan": "sum", "Net Üretim Süresi (Gün)": "count"}).reset_index()
+            op_ozet.rename(columns={"Net Üretim Süresi (Gün)": "Tamamlanan İş Sayısı"}, inplace=True)
             op_ozet["Kişi Başı Puan"] = round(op_ozet["Kişi Başı Puan"], 1)
             st.dataframe(op_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
+            
+            # Global Operatör Puan Listesi (Optimizasyon için saklıyoruz)
+            global_op_puanlari = op_ozet.copy()
 
     with tab3:
-        st.subheader("🔮 Makine Öğrenmesi Tahmini (Toplam Teslimat Süresi)")
-        st.markdown("Yapay zeka modeli hem **Net İmalat Süresini** hem de olası **Malzeme / Tedarik Bekleme Süresini** ayrı ayrı tahmin ederek toplam takvim gününü verir.")
+        st.subheader("🔮 Makine Öğrenmesi Tahmini & İş Yükü Dengeleme (Yöneylem)")
+        st.markdown("Yapay zeka modeli hem net imalat süresini hesaplar, hem istatistiksel hata metriklerini (MAE/RMSE) sunar, hem de yeni siparişin atölye içindeki **optimum operatör atamasını** yapar.")
+        
         if rf_net is None:
             st.warning("Modeli eğitmek için bu kategoride yeterli sipariş geçmişi bulunamadı (En az 5 sipariş gerekli).")
         else:
+            # 1. YENİ EKLENEN: MODEL GÜVENİLİRLİĞİ (METRİKLER)
+            with st.expander("📈 Model Güvenilirliği ve Hata Analizi (Tıkla Genişlet)", expanded=False):
+                st.markdown("Arka plandaki modelin test verisi üzerindeki istatistiksel sapma miktarlarıdır:")
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    st.markdown("**Net İmalat Modeli (Random Forest)**")
+                    st.write(f"- **MAE (Ort. Mutlak Hata):** ± {model_metrikleri['Net_MAE']:.2f} Gün")
+                    st.write(f"- **RMSE (Kök Ort. Kare Hata):** ± {model_metrikleri['Net_RMSE']:.2f} Gün")
+                with col_m2:
+                    st.markdown("**Bekleme/Gecikme Modeli (Random Forest)**")
+                    st.write(f"- **MAE (Ort. Mutlak Hata):** ± {model_metrikleri['Bekleme_MAE']:.2f} Gün")
+                    st.write(f"- **RMSE (Kök Ort. Kare Hata):** ± {model_metrikleri['Bekleme_RMSE']:.2f} Gün")
+
+            st.markdown("---")
             col1, col2 = st.columns(2)
             dinamik_urunler = sorted(df_kategori["Ürün Çeşidi"].unique().tolist(), key=aile_bazli_siralama)
-            if not dinamik_urunler: 
-                dinamik_urunler = sorted(list(ZORLUK_HARITASI.keys()), key=aile_bazli_siralama)
+            if not dinamik_urunler: dinamik_urunler = sorted(list(ZORLUK_HARITASI.keys()), key=aile_bazli_siralama)
             
             with col1:
                 input_urun = st.selectbox("Ürün Çeşidi", dinamik_urunler)
@@ -414,7 +417,8 @@ try:
                 input_teknik = st.slider("Teknik Zorluk Puanı", min_value=1.0, max_value=10.0, value=1.0)
                 input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
                 
-            if st.button("🚀 Toplam Teslimat Süresini Tahmin Et", type="primary"):
+            if st.button("🚀 Tahmin Et & Operatör Öner", type="primary"):
+                # --- TAHMİN BÖLÜMÜ ---
                 def dinamik_zorluk_manuel(urun):
                     urun_str = str(urun).upper()
                     if urun_str in ZORLUK_HARITASI: base_v = ZORLUK_HARITASI[urun_str]
@@ -462,24 +466,26 @@ try:
                 with col_b:
                     st.metric("⏳ Tahmini Bekleme / Tedarik Süresi", f"{tahmini_bekleme_gun:.1f} Gün")
                 
-                yerel_carpanlar = np.array([norm_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, (3.0 / input_kisi)])
-                yerel_etkiler = yerel_carpanlar * onem_yuzdeleri
-                yerel_yuzdeler = (yerel_etkiler / np.sum(yerel_etkiler)) * 100
-                
-                etiketler = ["Ürün Zorluğu (1-10)", "Kapasite", "Ebat (m²)", "Teknik Detaylar", "Çelik Kullanımı", "Ekip Yetersizliği"]
-                
+                # 2. YENİ EKLENEN: İŞ YÜKÜ DENGELEME VE OPTİMİZASYON TAVSİYESİ
                 st.markdown("---")
-                st.subheader("🎯 İmalatı En Çok Ne Yavaşlatıyor?")
-                fig, ax = plt.subplots(figsize=(8, 3))
-                sirali_indeksler = np.argsort(yerel_yuzdeler)[::-1]
-                sirali_yuzdeler = yerel_yuzdeler[sirali_indeksler]
-                sirali_etiketler = [etiketler[i] for i in sirali_indeksler]
-                renkler = ['crimson' if i == 0 else 'steelblue' for i in range(len(sirali_yuzdeler))]
-                ax.barh(sirali_etiketler[::-1], sirali_yuzdeler[::-1], color=renkler[::-1], edgecolor='black')
-                ax.set_xlabel("Siparişe Etki Yüzdesi (%)")
-                for index, value in enumerate(sirali_yuzdeler[::-1]):
-                    ax.text(value + 0.5, index, f"%{value:.1f}", va='center')
-                st.pyplot(fig)
+                st.markdown("### 🔄 Yöneylem & İş Yükü Dengeleme (Atama Tavsiyesi)")
+                
+                # A. Uzmanlık Tavsiyesi (Bu makineyi geçmişte en hızlı bitiren kim?)
+                df_uzman = df_op[df_op["Ürün Çeşidi"] == input_urun]
+                if not df_uzman.empty:
+                    en_hizli_op = df_uzman.groupby("Operatörler")["Net Üretim Süresi (Gün)"].mean().idxmin()
+                    en_hizli_sure = df_uzman.groupby("Operatörler")["Net Üretim Süresi (Gün)"].mean().min()
+                    st.info(f"🏆 **Hız ve Uzmanlık Tavsiyesi:** Bu sipariş tipi için en tecrübeli/hızlı operatör **{en_hizli_op}** (Ortalama {en_hizli_sure:.1f} günde tamamlıyor). Hızlı çıkması gereken acil bir siparişse ona atanması önerilir.")
+                else:
+                    st.info("🏆 **Hız ve Uzmanlık Tavsiyesi:** Bu ürün tipi için geçmişte net bir operatör verisi bulunamadı.")
+                
+                # B. Kapasite Tavsiyesi (Toplam iş yükü / Puanı en az olan kim?)
+                if 'global_op_puanlari' in locals() and not global_op_puanlari.empty:
+                    # Sadece 3'ten fazla iş yapmış aktif personeli filtrele (Yeni/stajyerleri elemek için)
+                    aktif_operatörler = global_op_puanlari[global_op_puanlari["Tamamlanan İş Sayısı"] >= 2]
+                    if not aktif_operatörler.empty:
+                        en_musait_op = aktif_operatörler.loc[aktif_operatörler["Kişi Başı Puan"].idxmin()]["Operatörler"]
+                        st.success(f"⚖️ **Kapasite ve İş Yükü Tavsiyesi:** Atölye genelinde anlık iş yükü/performans puanı en düşük olan kişi **{en_musait_op}**. Fabrika içi adil iş dağılımı (Line Balancing) için siparişin bu operatöre atanması önerilir.")
 
     with tab4:
         st.subheader("🏭 Genel Üretim Karakteristiği")
