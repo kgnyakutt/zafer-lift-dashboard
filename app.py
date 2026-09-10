@@ -44,11 +44,8 @@ ZORLUK_HARITASI = {
     "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
     "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
     "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
-    "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
-    "DÜZRAMPA": 1.0, "MENTEŞELİRAMPA": 2.0, "MENLİFT": 2.5, 
-    "1MAKASLI": 3.0, "2MAKASLI": 4.5, "3MAKASLI": 6.0,
-    "1KOLONLU": 3.5, "2KOLONLU": 5.0, "4KOLONLU": 8.0,
-    "ENGELLİRAMPASI": 1.0
+    "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0
+    
 }
 
 MAKSIMUM_CARPAN_KAPASITE = 2.0   
