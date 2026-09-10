@@ -365,8 +365,7 @@ try:
         st.dataframe(merged_df, use_container_width=True)
 
     with tab2:
-        st.subheader("👷 Operatör Performans Puanları (Gecikmelerden Arındırılmış & Hız Çarpanlı)")
-        st.markdown("💡 *Not: Toplam takvim gününden bekleme süreleri çıkarılır. Kalan NET SÜRE ne kadar kısaysa (iş ne kadar hızlı çıkarılırsa), operatör o kadar yüksek Hız Çarpanı (Bonus) alır!*")
+        st.subheader("👷 Operatör Performans Puanları")
         if not df_filtred.empty:
             df_op = df_filtred.copy()
             df_op['Operatörler'] = df_op['Operatörler'].str.split(',')
