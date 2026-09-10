@@ -7,7 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
-from st_gsheets_connection import GSheetsConnection
+from st_gsheets_connection import GSheetsConnection  # <-- DÜZELTİLEN SATIR BURASI
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -62,7 +62,7 @@ secilen_kategori = st.sidebar.radio(
 @st.cache_data(ttl=60)
 def veri_isle():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(ttl=60) # Google E-Tablodan canlı veri çeker
+    df = conn.read(ttl=60)
     
     def urun_normalize(deger):
         if pd.isna(deger): return deger
