@@ -105,7 +105,6 @@ def veri_isle(dosya_kaynagi):
         if match: return float(match.group())
         return 1.0
         
-    # --- TEL FONK / KORKULUK HESAPLAMA MANTIĞI ---
     def korkuluk_hesapla(deger, urun):
         if pd.isna(deger): 
             s = ""
@@ -113,12 +112,10 @@ def veri_isle(dosya_kaynagi):
             s = str(deger).lower().strip()
             
         if urun_makasli_mi(urun):
-            # Makaslı Kuralları: Düz(1), Tel(1.3), Sac(1.75)
             if "sac" in s: return 1.75
             elif "tel" in s: return 1.3
             else: return 1.0
         else:
-            # Asansör Kuralları: Tel(1), Sac(1.75)
             if "sac" in s: return 1.75
             else: return 1.0
 
@@ -127,7 +124,6 @@ def veri_isle(dosya_kaynagi):
         
     df.columns = df.columns.str.strip()
     
-    # Tonaj sütunu Kapasite olarak güncellendi, Tel Fonk sütunu eklendi
     hedef_sutunlar = ["Sipariş No", "Ürün Çeşidi", "Çelik Durumu (1/0)", "Kapasite", "Metrekare", "Metrekare (m2)", "Teknik Puan", "Sipariş Başlangıç", "Sipariş Çıkış(Boya Hariç)", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk"]
     df = df[[col for col in hedef_sutunlar if col in df.columns]]
 
@@ -184,6 +180,16 @@ def yapay_zeka_egit(df_model):
 def dogal_siralama_anahtari(x):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(x))]
 
+# --- TEZGAH SAYISAL SIRALAMA FONKSİYONU (1, 2, 3, 4, 5...) ---
+def tezgah_siralama_anahtari(x):
+    try:
+        return (0, int(x))
+    except:
+        m = re.search(r'\d+', str(x))
+        if m:
+            return (0, int(m.group()))
+        return (1, str(x))
+
 # --- ANA UYGULAMA ---
 try:
     df_raw = veri_isle(yuklenen_dosya)
@@ -214,9 +220,14 @@ try:
     
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Operatör & Tezgah Filtresi")
-    secilen_tezgah = st.sidebar.selectbox("Tezgah Seçin", ["Tümü"] + list(df["Tezgah"].dropna().unique()))
-    tum_operatorler = set(op.strip() for ops in df["Operatörler"].dropna() for op in ops.split(',') if op.strip())
-    secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + sorted(list(tum_operatorler)))
+    
+    # TEZGAHLAR SAYISAL OLARAK SIRALANDI (1, 2, 3, 4, 5...)
+    tezgahlar_sirali = sorted(list(df["Tezgah"].dropna().unique()), key=tezgah_siralama_anahtari)
+    secilen_tezgah = st.sidebar.selectbox("Tezgah Seçin", ["Tümü"] + tezgahlar_sirali)
+    
+    # OPERATÖRLER ALFABETİK OLARAK SIRALANDI
+    tum_operatorler = sorted(list(set(op.strip() for ops in df["Operatörler"].dropna() for op in ops.split(',') if op.strip())))
+    secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + tum_operatorler)
     
     df_filtred = df.copy()
     if secilen_tezgah != "Tümü": df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
@@ -293,7 +304,6 @@ try:
                 input_kapasite = st.number_input("Kapasite (Ton/Adet)", value=1.0, min_value=0.1)
                 input_m2 = st.number_input("Ebat (Metrekare)", value=1.0, min_value=0.1)
                 
-                # Makine tipine göre dinamik Tel Fonk seçenekleri
                 if urun_makasli_mi(input_urun):
                     input_telfonk = st.selectbox("Tel Fonk / Kaplama", ["Düz (Standart)", "Tel", "Sac"])
                 else:
