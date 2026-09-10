@@ -56,7 +56,7 @@ secilen_kategori = st.sidebar.radio(
     ["Tümü (Genel Analiz)", "Makaslı Üretimler (Makaslılar, EYP, EEP vb.)", "Asansör ve Diğerleri (Kolonlu, HYM, Rampa vb.)"]
 )
 
-# --- VERİ İŞLEME (GÜVENLİ TİP DÖNÜŞÜMLÜ) ---
+# --- VERİ İŞLEME (ÜRÜN ZORLUĞU 1-10 ARASI NORMAlİZE EDİLDİ) ---
 @st.cache_data(ttl=60)
 def veri_isle():
     sheet_url = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv"
@@ -128,7 +128,9 @@ def veri_isle():
     if "Tel Fonk" not in df.columns:
         df["Tel Fonk"] = "Tel"
     df["Korkuluk Çarpanı"] = df.apply(lambda row: korkuluk_hesapla(row["Tel Fonk"], row["Ürün Çeşidi"]), axis=1)
-    df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].apply(dinamik_zorluk) * df["Korkuluk Çarpanı"]
+    
+    # Ham Zorluk Hesabı (Önce ham değeri buluyoruz)
+    df["Ham_Zorluk"] = df["Ürün Çeşidi"].apply(dinamik_zorluk) * df["Korkuluk Çarpanı"]
 
     df["Çelik Durumu (1/0)"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0)
     df["Çelik Çarpanı"] = df["Çelik Durumu (1/0)"] + 1.0
@@ -144,7 +146,6 @@ def veri_isle():
     
     df["Toplam Süre (Gün)"] = (df["Sipariş Çıkış Tarihi"] - df["Sipariş Başlangıç Tarihi"]).dt.days
     
-    # Bekleme süresi sütun güvenliği
     if "Bekleme Süresi (Gün)" in df.columns:
         df["Bekleme Süresi (Gün)"] = pd.to_numeric(df["Bekleme Süresi (Gün)"], errors='coerce').fillna(0.0)
     else:
@@ -215,6 +216,14 @@ def tezgah_siralama_anahtari(x):
 try:
     df_raw = veri_isle()
     
+    # Ham zorluk değerlerini 1 ile 10 arasında normalize etme (En kolay: 1, En zor: 10)
+    min_ham_z = df_raw["Ham_Zorluk"].min()
+    max_ham_z = df_raw["Ham_Zorluk"].max()
+    if max_ham_z > min_ham_z:
+        df_raw["Zorluk Katsayısı"] = 1.0 + ((df_raw["Ham_Zorluk"] - min_ham_z) / (max_ham_z - min_ham_z)) * (10.0 - 1.0)
+    else:
+        df_raw["Zorluk Katsayısı"] = 1.0
+
     if "Makaslı Üretimler" in secilen_kategori:
         df = df_raw[df_raw["Ürün Çeşidi"].apply(urun_makasli_mi)].copy()
     elif "Asansör ve Diğerleri" in secilen_kategori:
@@ -264,7 +273,10 @@ try:
             beklenen_urunler = list(ZORLUK_HARITASI.keys())
             
         base_df = pd.DataFrame({"Ürün Çeşidi": beklenen_urunler})
-        base_df["Katsayı (Ortalama)"] = base_df["Ürün Çeşidi"].map(ZORLUK_HARITASI)
+        base_df["Katsayı (Normalize 1-10)"] = base_df["Ürün Çeşidi"].map(ZORLUK_HARITASI)
+        # Tablo için de 1-10 arası normalize edelim
+        if max_ham_z > min_ham_z:
+            base_df["Katsayı (Normalize 1-10)"] = base_df["Katsayı (Normalize 1-10)"].apply(lambda x: 1.0 + ((x - min_ham_z) / (max_ham_z - min_ham_z)) * (10.0 - 1.0) if not pd.isna(x) else 1.0)
         base_df["Toplam"] = 0
         base_df["Ortalama"] = 0.0
         base_df["Ortalama Toplam Süre (Gün)"] = 0.0
@@ -277,14 +289,14 @@ try:
                 "Toplam Süre (Gün)": "mean", 
                 "Sipariş No": "count" if "Sipariş No" in df_filtred.columns else lambda x: len(x)
             }).reset_index()
-            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı (Ortalama)", "Toplam", "Ortalama", "Ortalama Toplam Süre (Gün)", "Sipariş Sayısı"]
+            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı (Normalize 1-10)", "Toplam", "Ortalama", "Ortalama Toplam Süre (Gün)", "Sipariş Sayısı"]
             merged_df = pd.concat([grup_ozet, base_df]).drop_duplicates(subset=["Ürün Çeşidi"], keep='first').reset_index(drop=True)
         else:
             merged_df = base_df
             
         merged_df["Toplam"] = merged_df["Toplam"].fillna(0).astype(int)
         merged_df["Sipariş Sayısı"] = merged_df["Sipariş Sayısı"].fillna(0).astype(int)
-        merged_df["Katsayı (Ortalama)"] = merged_df["Katsayı (Ortalama)"].fillna(1.0).round(2)
+        merged_df["Katsayı (Normalize 1-10)"] = merged_df["Katsayı (Normalize 1-10)"].fillna(1.0).round(2)
         merged_df["Ortalama"] = merged_df["Ortalama"].fillna(0.0).round(2)
         merged_df["Ortalama Toplam Süre (Gün)"] = merged_df["Ortalama Toplam Süre (Gün)"].fillna(0.0).round(2)
         
@@ -336,32 +348,29 @@ try:
             if st.button("🚀 Toplam Teslimat Süresini Tahmin Et", type="primary"):
                 def dinamik_zorluk_manuel(urun):
                     urun_str = str(urun).upper()
-                    if urun_str in ZORLUK_HARITASI: return ZORLUK_HARITASI[urun_str]
-                    if any(kod in urun_str for kod in ["EYP", "HYM", "EEP", "EAP"]): return 2.5
-                    if "ÖZEL" in urun_str or "OZEL" in urun_str:
-                        if "MAKASLI" in urun_str: return 6.5
-                        elif "KOLONLU" in urun_str: return 6.0
-                        return 3.0
-                    return 1.5
+                    if urun_str in ZORLUK_HARITASI: base_v = ZORLUK_HARITASI[urun_str]
+                    elif any(kod in urun_str for kod in ["EYP", "HYM", "EEP", "EAP"]): base_v = 2.5
+                    elif "ÖZEL" in urun_str or "OZEL" in urun_str: base_v = 3.0
+                    else: base_v = 1.5
                     
-                ham_zorluk = dinamik_zorluk_manuel(input_urun)
-                
-                if urun_makasli_mi(input_urun):
-                    if input_telfonk == "Sac": telfonk_carp = 1.75
-                    elif input_telfonk == "Tel": telfonk_carp = 1.3
-                    else: telfonk_carp = 1.0
-                else:
-                    if input_telfonk == "Sac": telfonk_carp = 1.75
-                    else: telfonk_carp = 1.0
+                    if urun_makasli_mi(urun):
+                        t_carp = 1.75 if input_telfonk == "Sac" else (1.3 if input_telfonk == "Tel" else 1.0)
+                    else:
+                        t_carp = 1.75 if input_telfonk == "Sac" else 1.0
                     
-                birlesik_zorluk = ham_zorluk * telfonk_carp
+                    ham = base_v * t_carp
+                    if max_ham_z > min_ham_z:
+                        return 1.0 + ((ham - min_ham_z) / (max_ham_z - min_ham_z)) * (10.0 - 1.0)
+                    return 1.0
+                    
+                norm_zorluk = dinamik_zorluk_manuel(input_urun)
                 
                 norm_kapasite = 1.0 + ((input_kapasite - min_kap) / (max_kap - min_kap)) * (MAKSIMUM_CARPAN_KAPASITE - 1.0) if max_kap > min_kap else 1.0
                 norm_m2 = 1.0 + ((input_m2 - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if urun_makasli_mi(input_urun) and max_m2 > min_m2 else 1.0
                 norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
                 celik_carp = input_celik + 1.0
                 
-                ham_veri = np.array([[birlesik_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, input_kisi]])
+                ham_veri = np.array([[norm_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, input_kisi]])
                 veri_scaled = sc.transform(ham_veri)
                 
                 tahmini_net_gun = max(rf_net.predict(veri_scaled)[0], 1.0)
@@ -376,11 +385,11 @@ try:
                 with col_b:
                     st.metric("⏳ Tahmini Bekleme / Tedarik Süresi", f"{tahmini_bekleme_gun:.1f} Gün")
                 
-                yerel_carpanlar = np.array([birlesik_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, (3.0 / input_kisi)])
+                yerel_carpanlar = np.array([norm_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, (3.0 / input_kisi)])
                 yerel_etkiler = yerel_carpanlar * onem_yuzdeleri
                 yerel_yuzdeler = (yerel_etkiler / np.sum(yerel_etkiler)) * 100
                 
-                etiketler = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Detaylar", "Çelik Kullanımı", "Ekip Yetersizliği"]
+                etiketler = ["Ürün Zorluğu (1-10)", "Kapasite", "Ebat (m²)", "Teknik Detaylar", "Çelik Kullanımı", "Ekip Yetersizliği"]
                 
                 st.markdown("---")
                 st.subheader("🎯 İmalatı En Çok Ne Yavaşlatıyor?")
@@ -400,7 +409,7 @@ try:
         st.markdown("Bu grafik, Google E-Tablo üzerinden çekilen net verilerle oluşturulmuştur.")
         if rf_net is not None:
             fig_genel, ax_genel = plt.subplots(figsize=(8, 3.5))
-            etiketler_genel = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
+            etiketler_genel = ["Ürün Zorluğu (1-10)", "Kapasite", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
             sirali_indeksler_g = np.argsort(onem_yuzdeleri)[::-1]
             sirali_yuzdeler_g = onem_yuzdeleri[sirali_indeksler_g]
             sirali_etiketler_g = [etiketler_genel[i] for i in sirali_indeksler_g]
