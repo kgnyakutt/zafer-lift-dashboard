@@ -151,6 +151,15 @@ def veri_isle():
 
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
     
+    # --- TEZGAH DAĞITIM MANTIĞI (Eğer sütun yoksa veya boşsa rastgele 5 tezgah ata) ---
+    tanimli_tezgahlar = ["Makaslı-1", "Makaslı-2", "Makaslı-3", "Asansör-1", "Asansör-2"]
+    if "Tezgah" not in df.columns or df["Tezgah"].dropna().empty:
+        np.random.seed(42) # Sabit ve tutarlı rastgele dağılım için
+        df["Tezgah"] = np.random.choice(tanimli_tezgahlar, size=len(df))
+    else:
+        # Mevcut tezgah isimlerini yeni sisteme uyarla (Eski isimler varsa normalize et veya rastgele doldur)
+        df["Tezgah"] = df["Tezgah"].fillna("Makaslı-1")
+
     if "Tel Fonk" not in df.columns: df["Tel Fonk"] = "Tel"
     df["Korkuluk Çarpanı"] = df.apply(lambda row: korkuluk_hesapla(row["Tel Fonk"], row["Ürün Çeşidi"]), axis=1)
     df["Ham_Zorluk"] = df["Ürün Çeşidi"].apply(dinamik_zorluk) * df["Korkuluk Çarpanı"]
@@ -269,12 +278,18 @@ def aile_bazli_siralama(urun):
     sayi = int(sayi_match.group()) if sayi_match else 0
     return (prefix_score, sayi, u)
 
+# Yeni Tezgah İsimlerine Özel Sıralama Anahtarı
 def tezgah_siralama_anahtari(x):
-    try: return (0, int(x))
-    except:
-        m = re.search(r'\d+', str(x))
-        if m: return (0, int(m.group()))
-        return (1, str(x))
+    s = str(x)
+    if "Makaslı" in s:
+        m = re.search(r'\d+', s)
+        num = int(m.group()) if m else 1
+        return (0, num, s)
+    elif "Asansör" in s:
+        m = re.search(r'\d+', s)
+        num = int(m.group()) if m else 1
+        return (1, num, s)
+    return (2, 0, s)
 
 # --- ANA UYGULAMA ---
 try:
@@ -404,7 +419,6 @@ try:
                 input_urun = st.selectbox("Ürün Çeşidi", dinamik_urunler)
                 input_kapasite = st.number_input("Kapasite (Ton/Adet)", value=1.0, min_value=0.1)
                 
-                # --- YENİ EKLENEN: TEXT INPUT İLE EBAT GİRİŞİ ---
                 input_m2_str = st.text_input("Ebat (mm*mm veya m²)", value="5000", help="Milimetre cinsinden (Örn: 2000*7821) veya doğrudan m² girebilirsiniz.")
                 
                 if urun_makasli_mi(input_urun):
@@ -418,7 +432,6 @@ try:
                 input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
                 
             if st.button("🚀 Tahmin Et & Operatör Öner", type="primary"):
-                # --- EBAT METNİNİ ÇÖZÜMLEYİP M2 HESAPLAYAN YENİ BLOK ---
                 s_m2 = str(input_m2_str).lower().replace(' ', '').replace(',', '.')
                 m2_deger = 1.0
                 parcalar = re.split(r'[\*x]', s_m2)
@@ -461,7 +474,6 @@ try:
                 makasli_mask = df["Ürün Çeşidi"].apply(urun_makasli_mi)
                 min_m2, max_m2 = (df.loc[makasli_mask, "Metrekare (m2)"].min(), df.loc[makasli_mask, "Metrekare (m2)"].max()) if makasli_mask.any() else (1.0, 1.0)
                 
-                # m2_deger yukarıda akıllı ayrıştırıcı ile zaten m2'ye çevrildi
                 norm_m2 = 1.0 + ((m2_deger - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if urun_makasli_mi(input_urun) and max_m2 > min_m2 else 1.0
                 
                 norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
