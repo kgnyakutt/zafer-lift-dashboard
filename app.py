@@ -56,7 +56,7 @@ secilen_kategori = st.sidebar.radio(
     ["Tümü (Genel Analiz)", "Makaslı Üretimler (Makaslılar, EYP, EEP vb.)", "Asansör ve Diğerleri (Kolonlu, HYM, Rampa vb.)"]
 )
 
-# --- VERİ İŞLEME (BEKLEME SÜRESİ ENTEGRE EDİLMİŞTİR) ---
+# --- VERİ İŞLEME (GÜVENLİ TİP DÖNÜŞÜMLÜ) ---
 @st.cache_data(ttl=60)
 def veri_isle():
     sheet_url = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv"
@@ -143,10 +143,15 @@ def veri_isle():
     df["Sipariş Çıkış Tarihi"] = pd.to_datetime(df["Sipariş Çıkış(Boya Hariç)"], dayfirst=True, errors='coerce')
     
     df["Toplam Süre (Gün)"] = (df["Sipariş Çıkış Tarihi"] - df["Sipariş Başlangıç Tarihi"]).dt.days
-    df["Bekleme Süresi (Gün)"] = pd.to_numeric(df.get("Bekleme Süresi (Gün)", 0.0), errors='coerce').fillna(0.0)
     
+    # Bekleme süresi sütun güvenliği
+    if "Bekleme Süresi (Gün)" in df.columns:
+        df["Bekleme Süresi (Gün)"] = pd.to_numeric(df["Bekleme Süresi (Gün)"], errors='coerce').fillna(0.0)
+    else:
+        df["Bekleme Süresi (Gün)"] = 0.0
+        
     df["Net Üretim Süresi (Gün)"] = df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]
-    df["Net Üretim Süresi (Gün)"] = df["Net Üretim Süresi (Gün)"].apply(lambda x: max(x, 1.0))
+    df["Net Üretim Süresi (Gün)"] = df["Net Üretim Süresi (Gün)"].apply(lambda x: max(x, 1.0) if not pd.isna(x) else 1.0)
 
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1)
@@ -154,7 +159,7 @@ def veri_isle():
 
     return df
 
-# --- ÇİFTLİ YAPAY ZEKA MODELİ (NET SÜRE + BEKLEME SÜRESİ TAHMİNİ) ---
+# --- ÇİFTLİ YAPAY ZEKA MODELİ ---
 @st.cache_resource
 def yapay_zeka_egit(df_model):
     X_cols = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
@@ -174,11 +179,9 @@ def yapay_zeka_egit(df_model):
     sc = StandardScaler()
     X_train_scaled = sc.fit_transform(X_train)
     
-    # Model 1: Aktif İmalat Süresi Tahmincisi
     rf_net = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
     rf_net.fit(X_train_scaled, y_net_train)
     
-    # Model 2: Bekleme / Gecikme Süresi Tahmincisi
     rf_bekleme = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
     rf_bekleme.fit(X_train_scaled, y_bek_train)
     
@@ -361,14 +364,12 @@ try:
                 ham_veri = np.array([[birlesik_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, input_kisi]])
                 veri_scaled = sc.transform(ham_veri)
                 
-                # Çift model tahmini
                 tahmini_net_gun = max(rf_net.predict(veri_scaled)[0], 1.0)
                 tahmini_bekleme_gun = max(rf_bekleme.predict(veri_scaled)[0], 0.0)
                 toplam_tahmin_gun = tahmini_net_gun + tahmini_bekleme_gun
                 
                 st.success(f"### 🎯 Toplam Tahmini Teslimat Süresi: **{toplam_tahmin_gun:.1f} Gün**")
                 
-                # Detay kutucukları
                 col_a, col_b = st.columns(2)
                 with col_a:
                     st.metric("🛠️ Tahmini Net İmalat Süresi", f"{tahmini_net_gun:.1f} Gün")
