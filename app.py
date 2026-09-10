@@ -405,7 +405,7 @@ try:
             with col1:
                 input_urun = st.selectbox("Ürün Çeşidi", dinamik_urunler)
                 input_kapasite = st.number_input("Kapasite (Ton/Adet)", value=1.0, min_value=0.1)
-                input_m2 = st.number_input("Ebat (mm*mm veya m²)", value=2000.0, min_value=1.0, help="Milimetre cinsinden girilebilir (Örn: 1500*2000)")
+                input_m2 = st.number_input("Ebat (mm*mm veya m²)", value=5000.0, min_value=1.0, help="Milimetre cinsinden girilebilir (Örn: 1500*2000)")
                 
                 if urun_makasli_mi(input_urun):
                     input_telfonk = st.selectbox("Tel Fonk / Kaplama", ["Düz (Standart)", "Tel", "Sac"])
