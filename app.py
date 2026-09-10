@@ -39,7 +39,6 @@ yuklenen_dosya = st.sidebar.file_uploader("Excel Dosyası Yükle (.xlsx)", type=
 
 st.sidebar.markdown("---")
 st.sidebar.header("🏗️ Üretim Kategorisi")
-# YENİ EKLENEN KATEGORİ AYIRICI
 secilen_kategori = st.sidebar.radio(
     "Hangi üretim tipini incelemek istiyorsunuz?",
     ["Tümü (Genel Analiz)", "Makaslı Platformlar", "Asansörler ve Diğer"]
@@ -51,7 +50,29 @@ def veri_isle(dosya_kaynagi):
     def urun_normalize(deger):
         if pd.isna(deger): return deger
         s = str(deger).strip().upper()
+        # Türkçe i/ı dönüşümlerini garanti altına almak için ufak bir temizlik
+        s = s.replace("İ", "I").replace("ı", "I") 
         return re.sub(r'[\s\.\-]+', '', s)
+
+    # --- YENİ EKLENEN: AKILLI ÖZEL ÜRETİM TANIMA SİSTEMİ ---
+    def dinamik_zorluk(urun):
+        if pd.isna(urun): return 1.0
+        urun_str = str(urun).upper()
+        
+        if urun_str in ZORLUK_HARITASI:
+            return ZORLUK_HARITASI[urun_str]
+        
+        # İçinde ÖZEL kelimesi geçiyorsa standart dışı imalat
+        if "ÖZEL" in urun_str or "OZEL" in urun_str:
+            if "MAKASLI" in urun_str:
+                return 6.5  # Özel makaslılar en zoru
+            elif "KOLONLU" in urun_str:
+                return 6.0
+            return 3.0
+            
+        # Tamamen yeni ve bilinmeyen bir modelse
+        return 1.5
+    # -------------------------------------------------------
 
     def tonaj_ayikla(deger):
         if pd.isna(deger) or str(deger).strip() == '': return 1.0
@@ -84,14 +105,16 @@ def veri_isle(dosya_kaynagi):
         return 1.0
 
     if dosya_kaynagi is not None: df = pd.read_excel(dosya_kaynagi)
-    else: df = pd.read_excel("personel_listesi_2.xlsx")
+    else: df = pd.read_excel("personel_listesi.xlsx") 
         
     df.columns = df.columns.str.strip()
     hedef_sutunlar = ["Sipariş No", "Ürün Çeşidi", "Çelik Durumu (1/0)", "Tonaj", "Metrekare", "Metrekare (m2)", "Teknik Puan", "Sipariş Başlangıç", "Sipariş Çıkış(Boya Hariç)", "Tezgah", "Operatörler", "Üretim Adedi", "Korkuluk Kaplama"]
     df = df[[col for col in hedef_sutunlar if col in df.columns]]
 
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
-    df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].map(ZORLUK_HARITASI).fillna(1.0)
+    
+    # Akıllı Zorluk Fonksiyonunu Devreye Sokuyoruz
+    df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].apply(dinamik_zorluk)
 
     df["Çelik Durumu (1/0)"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0)
     df["Çelik Çarpanı"] = df["Çelik Durumu (1/0)"] + 1.0
@@ -149,11 +172,12 @@ def yapay_zeka_egit(df_model):
 try:
     df_raw = veri_isle(yuklenen_dosya)
     
-    # 1. KATEGORİYE GÖRE VERİYİ FİLTRELEME
+    # 1. KATEGORİYE GÖRE VERİYİ FİLTRELEME (TÜRKÇE KARAKTER HATASI GİDERİLDİ)
+    # Ürün çeşidi en başta .upper() ile büyütüldüğü için direkt "MAKASLI" aranır.
     if secilen_kategori == "Makaslı Platformlar":
-        df = df_raw[df_raw["Ürün Çeşidi"].str.lower().str.contains("makaslı", na=False)].copy()
+        df = df_raw[df_raw["Ürün Çeşidi"].str.contains("MAKASLI", na=False)].copy()
     elif secilen_kategori == "Asansörler ve Diğer":
-        df = df_raw[~df_raw["Ürün Çeşidi"].str.lower().str.contains("makaslı", na=False)].copy()
+        df = df_raw[~df_raw["Ürün Çeşidi"].str.contains("MAKASLI", na=False)].copy()
     else:
         df = df_raw.copy()
 
@@ -162,18 +186,18 @@ try:
         min_tonaj, max_tonaj = df["Tonaj"].min(), df["Tonaj"].max()
         df["Normalize_Tonaj"] = 1.0 if max_tonaj == min_tonaj else 1.0 + ((df["Tonaj"] - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0)
         
-        makasli_mask = df["Ürün Çeşidi"].str.lower().str.contains("makaslı", na=False)
+        makasli_mask = df["Ürün Çeşidi"].str.contains("MAKASLI", na=False)
         min_m2, max_m2 = (df.loc[makasli_mask, "Metrekare (m2)"].min(), df.loc[makasli_mask, "Metrekare (m2)"].max()) if makasli_mask.any() else (1.0, 1.0)
 
         def m2_normalize_hesapla(row):
-            if "makaslı" in str(row["Ürün Çeşidi"]).lower() and max_m2 > min_m2:
+            if "MAKASLI" in str(row["Ürün Çeşidi"]) and max_m2 > min_m2:
                 return 1.0 + ((row["Metrekare (m2)"] - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0)
             return 1.0 
         df["Normalize_Metrekare"] = df.apply(m2_normalize_hesapla, axis=1)
         
         df["Normalize_Teknik"] = 1.0 + ((df["Teknik Puan"] - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
     else:
-        st.error("Bu kategoride hiç veri bulunamadı! Lütfen başka bir kategori seçin.")
+        st.error("Bu kategoride hiç veri bulunamadı! Lütfen sol menüden başka bir kategori seçin veya Excel dosyanızı kontrol edin.")
         st.stop()
 
     # 3. YALNIZCA SEÇİLEN KATEGORİ İLE YAPAY ZEKA EĞİTİMİ
@@ -223,7 +247,6 @@ try:
         else:
             col1, col2 = st.columns(2)
             
-            # Ürün Çeşidi Kutusunu Dinamik Yapalım (Sadece seçilen kategorideki ürünleri göstersin)
             dinamik_urunler = sorted(df["Ürün Çeşidi"].unique().tolist())
             if not dinamik_urunler: dinamik_urunler = list(ZORLUK_HARITASI.keys())
             
@@ -238,7 +261,18 @@ try:
                 input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
                 
             if st.button("🚀 Üretim Süresini Tahmin Et ve Analiz Çıkar", type="primary"):
-                zorluk = ZORLUK_HARITASI.get(input_urun, 1.0)
+                # Manuel girişte de aynı akıllı zorluk fonksiyonunu kullanalım
+                def dinamik_zorluk(urun):
+                    if pd.isna(urun): return 1.0
+                    urun_str = str(urun).upper()
+                    if urun_str in ZORLUK_HARITASI: return ZORLUK_HARITASI[urun_str]
+                    if "ÖZEL" in urun_str or "OZEL" in urun_str:
+                        if "MAKASLI" in urun_str: return 6.5
+                        elif "KOLONLU" in urun_str: return 6.0
+                        return 3.0
+                    return 1.5
+                    
+                zorluk = dinamik_zorluk(input_urun)
                 norm_tonaj = 1.0 + ((input_tonaj - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0) if max_tonaj > min_tonaj else 1.0
                 norm_m2 = 1.0 + ((input_m2 - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if "MAKASLI" in input_urun and max_m2 > min_m2 else 1.0
                 norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
@@ -286,7 +320,7 @@ try:
                 elif en_buyuk_etken == "Tonaj":
                     st.info("Bu siparişte **Tonaj (Ağırlık) kaynaklı** ciddi bir süre artışı var. Atölyedeki vinç ve malzeme taşıma hatlarının bu siparişe göre önceden rezerve edilmesi önerilir.")
                 elif en_buyuk_etken == "Ürün Zorluğu":
-                    st.info(f"Süreyi en çok seçtiğiniz ürün tipinin (**{input_urun}**) imalat zorluğu etkiliyor. Standart bir üretim kalıbı kullanmanız hız kazandırabilir.")
+                    st.info(f"Süreyi en çok seçtiğiniz ürün tipinin (**{input_urun}**) imalat zorluğu etkiliyor. Standart bir üretim kalıbı kullanmanız hız kazandırabilir. Özel imalatsa tedarik sürecini erkenden başlatın.")
                 elif en_buyuk_etken == "Çelik Kullanımı":
                     st.info("Çelik kullanımı kaynak ve işleme sürelerini uzatmaktadır. Kaynak istasyonlarının hazır bulunduğundan emin olun.")
                 elif en_buyuk_etken == "Korkuluk Kaplama":
