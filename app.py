@@ -374,7 +374,6 @@ try:
             op_ozet["Kişi Başı Puan"] = round(op_ozet["Kişi Başı Puan"], 1)
             st.dataframe(op_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
             
-            # Global Operatör Puan Listesi (Optimizasyon için saklıyoruz)
             global_op_puanlari = op_ozet.copy()
 
     with tab3:
@@ -384,7 +383,6 @@ try:
         if rf_net is None:
             st.warning("Modeli eğitmek için bu kategoride yeterli sipariş geçmişi bulunamadı (En az 5 sipariş gerekli).")
         else:
-            # 1. YENİ EKLENEN: MODEL GÜVENİLİRLİĞİ (METRİKLER)
             with st.expander("📈 Model Güvenilirliği ve Hata Analizi (Tıkla Genişlet)", expanded=False):
                 st.markdown("Arka plandaki modelin test verisi üzerindeki istatistiksel sapma miktarlarıdır:")
                 col_m1, col_m2 = st.columns(2)
@@ -405,7 +403,9 @@ try:
             with col1:
                 input_urun = st.selectbox("Ürün Çeşidi", dinamik_urunler)
                 input_kapasite = st.number_input("Kapasite (Ton/Adet)", value=1.0, min_value=0.1)
-                input_m2 = st.number_input("Ebat (mm*mm veya m²)", value=5000.0, min_value=1.0, help="Milimetre cinsinden girilebilir (Örn: 1500*2000)")
+                
+                # --- YENİ EKLENEN: TEXT INPUT İLE EBAT GİRİŞİ ---
+                input_m2_str = st.text_input("Ebat (mm*mm veya m²)", value="2000", help="Milimetre cinsinden (Örn: 2000*7821) veya doğrudan m² girebilirsiniz.")
                 
                 if urun_makasli_mi(input_urun):
                     input_telfonk = st.selectbox("Tel Fonk / Kaplama", ["Düz (Standart)", "Tel", "Sac"])
@@ -418,7 +418,22 @@ try:
                 input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
                 
             if st.button("🚀 Tahmin Et & Operatör Öner", type="primary"):
-                # --- TAHMİN BÖLÜMÜ ---
+                # --- EBAT METNİNİ ÇÖZÜMLEYİP M2 HESAPLAYAN YENİ BLOK ---
+                s_m2 = str(input_m2_str).lower().replace(' ', '').replace(',', '.')
+                m2_deger = 1.0
+                parcalar = re.split(r'[\*x]', s_m2)
+                if len(parcalar) == 2:
+                    try:
+                        en = float(re.search(r'[\d\.]+', parcalar[0]).group())
+                        boy = float(re.search(r'[\d\.]+', parcalar[1]).group())
+                        m2_deger = (en * boy) / 1_000_000.0
+                    except: pass
+                else:
+                    match = re.search(r'[\d\.]+', s_m2)
+                    if match:
+                        val = float(match.group())
+                        m2_deger = (val / 1_000_000.0) if val > 100 else val
+
                 def dinamik_zorluk_manuel(urun):
                     urun_str = str(urun).upper()
                     if urun_str in ZORLUK_HARITASI: base_v = ZORLUK_HARITASI[urun_str]
@@ -445,7 +460,8 @@ try:
                 
                 makasli_mask = df["Ürün Çeşidi"].apply(urun_makasli_mi)
                 min_m2, max_m2 = (df.loc[makasli_mask, "Metrekare (m2)"].min(), df.loc[makasli_mask, "Metrekare (m2)"].max()) if makasli_mask.any() else (1.0, 1.0)
-                m2_deger = (input_m2 / 1_000_000.0) if input_m2 > 100 else input_m2
+                
+                # m2_deger yukarıda akıllı ayrıştırıcı ile zaten m2'ye çevrildi
                 norm_m2 = 1.0 + ((m2_deger - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if urun_makasli_mi(input_urun) and max_m2 > min_m2 else 1.0
                 
                 norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
@@ -466,11 +482,9 @@ try:
                 with col_b:
                     st.metric("⏳ Tahmini Bekleme / Tedarik Süresi", f"{tahmini_bekleme_gun:.1f} Gün")
                 
-                # 2. YENİ EKLENEN: İŞ YÜKÜ DENGELEME VE OPTİMİZASYON TAVSİYESİ
                 st.markdown("---")
                 st.markdown("### 🔄 Yöneylem & İş Yükü Dengeleme (Atama Tavsiyesi)")
                 
-                # A. Uzmanlık Tavsiyesi (Bu makineyi geçmişte en hızlı bitiren kim?)
                 df_uzman = df_op[df_op["Ürün Çeşidi"] == input_urun]
                 if not df_uzman.empty:
                     en_hizli_op = df_uzman.groupby("Operatörler")["Net Üretim Süresi (Gün)"].mean().idxmin()
@@ -479,9 +493,7 @@ try:
                 else:
                     st.info("🏆 **Hız ve Uzmanlık Tavsiyesi:** Bu ürün tipi için geçmişte net bir operatör verisi bulunamadı.")
                 
-                # B. Kapasite Tavsiyesi (Toplam iş yükü / Puanı en az olan kim?)
                 if 'global_op_puanlari' in locals() and not global_op_puanlari.empty:
-                    # Sadece 3'ten fazla iş yapmış aktif personeli filtrele (Yeni/stajyerleri elemek için)
                     aktif_operatörler = global_op_puanlari[global_op_puanlari["Tamamlanan İş Sayısı"] >= 2]
                     if not aktif_operatörler.empty:
                         en_musait_op = aktif_operatörler.loc[aktif_operatörler["Kişi Başı Puan"].idxmin()]["Operatörler"]
