@@ -405,7 +405,7 @@ try:
                 input_kapasite = st.number_input("Kapasite (Ton/Adet)", value=1.0, min_value=0.1)
                 
                 # --- YENİ EKLENEN: TEXT INPUT İLE EBAT GİRİŞİ ---
-                input_m2_str = st.text_input("Ebat (mm*mm veya m²)", value="2000", help="Milimetre cinsinden (Örn: 2000*7821) veya doğrudan m² girebilirsiniz.")
+                input_m2_str = st.text_input("Ebat (mm*mm veya m²)", value="5000", help="Milimetre cinsinden (Örn: 2000*7821) veya doğrudan m² girebilirsiniz.")
                 
                 if urun_makasli_mi(input_urun):
                     input_telfonk = st.selectbox("Tel Fonk / Kaplama", ["Düz (Standart)", "Tel", "Sac"])
