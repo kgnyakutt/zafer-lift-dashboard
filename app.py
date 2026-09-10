@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import re
 import streamlit as st
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LinearRegression
@@ -110,7 +111,7 @@ def veri_isle(dosya_kaynagi):
 
     return df, min_tonaj, max_tonaj, min_m2, max_m2
 
-# --- MAKİNE ÖĞRENMESİ MODELİ (Sadece veri değiştiğinde eğitilir) ---
+# --- MAKİNE ÖĞRENMESİ MODELİ & ETKİ ANALİZİ ---
 @st.cache_resource
 def yapay_zeka_egit(df):
     X_cols = ["Zorluk Katsayısı", "Normalize_Tonaj", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
@@ -119,28 +120,33 @@ def yapay_zeka_egit(df):
     df_model = df.dropna(subset=[Y_col] + X_cols).copy()
     df_model = df_model[df_model[Y_col] > 0]
     
-    if len(df_model) < 5: return None, None, None # Veri yetersizse
+    if len(df_model) < 5: return None, None, None, None # Veri yetersizse
     
     X = df_model[X_cols].values
     y = df_model[Y_col].values
     
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
     sc = StandardScaler()
+    X_train_scaled = sc.fit_transform(X_train)
     
-    # 2. Derece Polinom Regresyonu kullanımı
+    # 1. YENİ EKLENEN KISIM: Etki analizi için doğrusal ağırlık hesaplama
+    base_lr = LinearRegression()
+    base_lr.fit(X_train_scaled, y_train)
+    onem_dereceleri = np.abs(base_lr.coef_)
+    onem_yuzdeleri = (onem_dereceleri / np.sum(onem_dereceleri)) * 100
+    
+    # 2. Asıl Tahmin Modeli (2. Derece Polinom Regresyonu)
     poly = PolynomialFeatures(degree=2, include_bias=False)
     regressor = LinearRegression()
-    
-    X_train_scaled = sc.fit_transform(X_train)
     X_train_poly = poly.fit_transform(X_train_scaled)
     regressor.fit(X_train_poly, y_train)
     
-    return regressor, sc, poly
+    return regressor, sc, poly, onem_yuzdeleri
 
 # --- ANA UYGULAMA ---
 try:
     df, min_tonaj, max_tonaj, min_m2, max_m2 = veri_isle(yuklenen_dosya)
-    regressor, sc, poly = yapay_zeka_egit(df)
+    regressor, sc, poly, onem_yuzdeleri = yapay_zeka_egit(df)
     
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Gelişmiş Filtreleme Paneli")
@@ -153,7 +159,7 @@ try:
     if secilen_tezgah != "Tümü": df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
     if secilen_operator != "Tümü": df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
 
-    # SEKMELER (Histogram çıkartıldı, 3 sekme kaldı)
+    # SEKMELER
     tab1, tab2, tab3 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "🤖 Yapay Zeka Tahmini"])
     
     with tab1:
@@ -182,7 +188,7 @@ try:
         st.markdown("Bu modül, geçmiş sipariş verilerinizi öğrenerek **2. Derece Polinom Regresyonu** ile yeni siparişlerinizin fabrikadan kaç günde çıkacağını tahmin eder.")
         
         if regressor is None:
-            st.warning("Modeli eğitmek için sisteme yüklenen Excel'de yeterli sipariş geçmişi (Teslim Süresi hesaplanabilen kayıt) bulunamadı.")
+            st.warning("Modeli eğitmek için sisteme yüklenen Excel'de yeterli sipariş geçmişi bulunamadı.")
         else:
             col1, col2 = st.columns(2)
             with col1:
@@ -209,7 +215,31 @@ try:
                 tahmini_gun = max(regressor.predict(veri_poly)[0], 1.0)
                 
                 st.success(f"### 🎉 Beklenen Üretim Süresi: **{tahmini_gun:.1f} Gün**")
-                st.info(f"**Model Detayı:** Tahmin işlemi mevcut {len(df.dropna(subset=['Teslim Süresi (Gün)']))} adet geçmiş sipariş verisi baz alınarak hesaplanmıştır.")
+                
+            # --- YENİ EKLENEN KISIM: ETKİ ANALİZİ GRAFİĞİ ---
+            st.markdown("---")
+            st.subheader("📊 Hangi Faktör Süreyi Daha Çok Etkiliyor?")
+            
+            # Grafiği Çizdirme
+            fig, ax = plt.subplots(figsize=(8, 3.5))
+            etiketler = ["Ürün Zorluğu", "Tonaj", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
+            
+            # Büyükten küçüğe sırala
+            sirali_indeksler = np.argsort(onem_yuzdeleri)[::-1]
+            sirali_yuzdeler = onem_yuzdeleri[sirali_indeksler]
+            sirali_etiketler = [etiketler[i] for i in sirali_indeksler]
+            
+            # Çubuk grafiği (Zafer Lift temasına uygun renklerle)
+            ax.barh(sirali_etiketler[::-1], sirali_yuzdeler[::-1], color='steelblue', edgecolor='black')
+            ax.set_xlabel("Etki Yüzdesi (%)")
+            ax.set_title("Üretim Süresini Belirleyen Temel Faktörlerin Ağırlığı")
+            
+            # Yüzdeleri çubukların sonuna yazdırma
+            for index, value in enumerate(sirali_yuzdeler[::-1]):
+                ax.text(value + 0.5, index, f"%{value:.1f}", va='center')
+                
+            st.pyplot(fig)
+            st.info("💡 **Nasıl Okunur?** Bu grafik, yapay zeka modelinin geçmiş siparişleri incelerken teslim süresini hesaplamada hangi değişkenlere daha çok ağırlık verdiğini (yüzdelik olarak) gösterir.")
 
 except ValueError as ve: st.warning(f"⚠️ Dosya Yükleme Hatası: {ve}")
 except Exception as e: st.error(f"Bir hata oluştu: {e}")
