@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LinearRegression
-import warnings
 from sklearn.ensemble import RandomForestRegressor
+import warnings
 warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması
@@ -105,15 +105,12 @@ def veri_isle(dosya_kaynagi):
     df["Sipariş Çıkış Tarihi"] = pd.to_datetime(df["Sipariş Çıkış(Boya Hariç)"], dayfirst=True, errors='coerce')
     df["Teslim Süresi (Gün)"] = (df["Sipariş Çıkış Tarihi"] - df["Sipariş Başlangıç Tarihi"]).dt.days
 
-    # ML Modeli için Operatör Sayısını Hesapla
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1)
     df['Kişi Sayısı'] = df['Kişi Sayısı'].replace(0, 1)
 
     return df, min_tonaj, max_tonaj, min_m2, max_m2
 
-# --- MAKİNE ÖĞRENMESİ MODELİ & ETKİ ANALİZİ ---
-@st.cache_resource
 # --- MAKİNE ÖĞRENMESİ MODELİ & ETKİ ANALİZİ ---
 @st.cache_resource
 def yapay_zeka_egit(df):
@@ -123,7 +120,7 @@ def yapay_zeka_egit(df):
     df_model = df.dropna(subset=[Y_col] + X_cols).copy()
     df_model = df_model[df_model[Y_col] > 0]
     
-    if len(df_model) < 5: return None, None, None, None # Veri yetersizse
+    if len(df_model) < 5: return None, None, None, None
     
     X = df_model[X_cols].values
     y = df_model[Y_col].values
@@ -132,12 +129,10 @@ def yapay_zeka_egit(df):
     sc = StandardScaler()
     X_train_scaled = sc.fit_transform(X_train)
     
-    # 1. YENİ: Etki analizi için RANDOM FOREST kullanımı (Çok daha gerçekçi ve dengeli sonuç verir)
-    rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+    rf_model = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
     rf_model.fit(X_train_scaled, y_train)
     onem_yuzdeleri = rf_model.feature_importances_ * 100
     
-    # 2. Asıl Tahmin Modeli (2. Derece Polinom Regresyonu - mevcut)
     poly = PolynomialFeatures(degree=2, include_bias=False)
     regressor = LinearRegression()
     X_train_poly = poly.fit_transform(X_train_scaled)
@@ -161,8 +156,8 @@ try:
     if secilen_tezgah != "Tümü": df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
     if secilen_operator != "Tümü": df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
 
-    # SEKMELER
-    tab1, tab2, tab3 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "🤖 Yapay Zeka Tahmini"])
+    # SEKMELER (Şimdi 4 Sekme Oldu)
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "🤖 Yapay Zeka Tahmini", "🏭 Fabrika Karakteristiği"])
     
     with tab1:
         st.subheader("Ürün Çeşidi Bazında Üretim Özeti")
@@ -186,8 +181,8 @@ try:
             st.dataframe(op_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
 
     with tab3:
-        st.subheader("🔮 Makine Öğrenmesi ile Teslim Süresi Tahmini")
-        st.markdown("Bu modül, geçmiş sipariş verilerinizi öğrenerek **2. Derece Polinom Regresyonu** ile yeni siparişlerinizin fabrikadan kaç günde çıkacağını tahmin eder.")
+        st.subheader("🔮 Makine Öğrenmesi ile Siparişe Özel Tahmin")
+        st.markdown("Aşağıdaki alanlara yeni üreteceğiniz makinenin özelliklerini girin. Sistem size hem süreyi söyleyecek hem de bu makineye özel tavsiyelerde bulunacaktır.")
         
         if regressor is None:
             st.warning("Modeli eğitmek için sisteme yüklenen Excel'de yeterli sipariş geçmişi bulunamadı.")
@@ -202,15 +197,14 @@ try:
                 input_teknik = st.slider("Teknik Zorluk Puanı", min_value=1.0, max_value=10.0, value=1.0)
                 input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
                 
-            if st.button("🚀 Üretim Süresini Tahmin Et", type="primary"):
-                # Arka plan normalizasyonu
+            if st.button("🚀 Üretim Süresini Tahmin Et ve Analiz Çıkar", type="primary"):
+                # 1. Tahmin Hesaplaması
                 zorluk = ZORLUK_HARITASI.get(input_urun, 1.0)
                 norm_tonaj = 1.0 + ((input_tonaj - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0) if max_tonaj > min_tonaj else 1.0
                 norm_m2 = 1.0 + ((input_m2 - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if "MAKASLI" in input_urun and max_m2 > min_m2 else 1.0
                 norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
                 celik_carp = input_celik + 1.0
                 
-                # Tahmin
                 ham_veri = np.array([[zorluk, norm_tonaj, norm_m2, norm_teknik, celik_carp, input_kisi]])
                 veri_scaled = sc.transform(ham_veri)
                 veri_poly = poly.transform(veri_scaled)
@@ -218,30 +212,71 @@ try:
                 
                 st.success(f"### 🎉 Beklenen Üretim Süresi: **{tahmini_gun:.1f} Gün**")
                 
-            # --- YENİ EKLENEN KISIM: ETKİ ANALİZİ GRAFİĞİ ---
-            st.markdown("---")
-            st.subheader("📊 Hangi Faktör Süreyi Daha Çok Etkiliyor?")
-            
-            # Grafiği Çizdirme
-            fig, ax = plt.subplots(figsize=(8, 3.5))
-            etiketler = ["Ürün Zorluğu", "Tonaj", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
-            
-            # Büyükten küçüğe sırala
-            sirali_indeksler = np.argsort(onem_yuzdeleri)[::-1]
-            sirali_yuzdeler = onem_yuzdeleri[sirali_indeksler]
-            sirali_etiketler = [etiketler[i] for i in sirali_indeksler]
-            
-            # Çubuk grafiği (Zafer Lift temasına uygun renklerle)
-            ax.barh(sirali_etiketler[::-1], sirali_yuzdeler[::-1], color='steelblue', edgecolor='black')
-            ax.set_xlabel("Etki Yüzdesi (%)")
-            ax.set_title("Üretim Süresini Belirleyen Temel Faktörlerin Ağırlığı")
-            
-            # Yüzdeleri çubukların sonuna yazdırma
-            for index, value in enumerate(sirali_yuzdeler[::-1]):
-                ax.text(value + 0.5, index, f"%{value:.1f}", va='center')
+                # 2. SİPARİŞE ÖZEL (YEREL) ETKİ HESAPLAMASI
+                # Kişi sayısı azaldıkça süreyi uzatma etkisi artar, o yüzden ters orantı kullanıyoruz.
+                yerel_carpanlar = np.array([zorluk, norm_tonaj, norm_m2, norm_teknik, celik_carp, (3.0 / input_kisi)])
+                yerel_etkiler = yerel_carpanlar * onem_yuzdeleri
+                yerel_yuzdeler = (yerel_etkiler / np.sum(yerel_etkiler)) * 100
                 
-            st.pyplot(fig)
-            st.info("💡 **Nasıl Okunur?** Bu grafik, yapay zeka modelinin geçmiş siparişleri incelerken teslim süresini hesaplamada hangi değişkenlere daha çok ağırlık verdiğini (yüzdelik olarak) gösterir.")
+                etiketler = ["Ürün Zorluğu", "Tonaj", "Ebat (m²)", "Teknik Detaylar", "Çelik Kullanımı", "Ekip Yetersizliği"]
+                
+                # Siparişe özel grafiği çizdirme
+                st.markdown("---")
+                st.subheader("🎯 Bu Makineyi En Çok Ne Yavaşlatıyor?")
+                
+                fig, ax = plt.subplots(figsize=(8, 3))
+                sirali_indeksler = np.argsort(yerel_yuzdeler)[::-1]
+                sirali_yuzdeler = yerel_yuzdeler[sirali_indeksler]
+                sirali_etiketler = [etiketler[i] for i in sirali_indeksler]
+                
+                # En yüksek etkeni kırmızı, diğerlerini mavi yapalım
+                renkler = ['crimson' if i == 0 else 'steelblue' for i in range(len(sirali_yuzdeler))]
+                
+                ax.barh(sirali_etiketler[::-1], sirali_yuzdeler[::-1], color=renkler[::-1], edgecolor='black')
+                ax.set_xlabel("Siparişe Etki Yüzdesi (%)")
+                
+                for index, value in enumerate(sirali_yuzdeler[::-1]):
+                    ax.text(value + 0.5, index, f"%{value:.1f}", va='center')
+                    
+                st.pyplot(fig)
+                
+                # 3. AKILLI TAVSİYE MOTORU (Decision Support)
+                en_buyuk_etken = sirali_etiketler[0]
+                
+                st.markdown("### 🤖 Yapay Zeka Tavsiyesi:")
+                if en_buyuk_etken == "Teknik Detaylar":
+                    st.warning("Bu siparişin süresini en çok **Teknik Detayların (Puanın) yüksekliği** uzatıyor. Üretime tecrübeli ustaların atanması ve üretim öncesi proje kontrolünün dikkatli yapılması önerilir.")
+                elif en_buyuk_etken == "Ekip Yetersizliği":
+                    st.warning(f"Şu anki değerlere göre süreyi en çok **Ekip Sayısının ({input_kisi} kişi) az olması** uzatıyor. Bu siparişe 1 veya 2 operatör daha eklerseniz üretim süresini ciddi oranda kısaltabilirsiniz.")
+                elif en_buyuk_etken == "Tonaj":
+                    st.info("Bu siparişte **Tonaj (Ağırlık) kaynaklı** ciddi bir süre artışı var. Atölyedeki vinç ve malzeme taşıma hatlarının bu siparişe göre önceden rezerve edilmesi önerilir.")
+                elif en_buyuk_etken == "Ürün Zorluğu":
+                    st.info(f"Süreyi en çok seçtiğiniz ürün tipinin (**{input_urun}**) imalat zorluğu etkiliyor. Standart bir üretim kalıbı kullanmanız hız kazandırabilir.")
+                elif en_buyuk_etken == "Çelik Kullanımı":
+                    st.info("Çelik kullanımı kaynak ve işleme sürelerini uzatmaktadır. Kaynak istasyonlarının hazır bulunduğundan emin olun.")
+                else:
+                    st.success("Sipariş parametreleri oldukça dengeli görünüyor. Standart üretim planınıza uyabilirsiniz.")
+
+    # 4. SEKME: FABRİKA KARAKTERİSTİĞİ (Eski Genel Grafik)
+    with tab4:
+        st.subheader("🏭 Fabrikanın Genel Üretim Karakteristiği")
+        st.markdown("Bu grafik; yeni gireceğiniz siparişleri değil, sisteme yüklenen Excel'deki **geçmiş tüm siparişlerin analizini** gösterir. Fabrikadaki işlerin uzamasını veya kısalmasını genel olarak nelerin belirlediğini ifade eder.")
+        
+        if regressor is not None:
+            fig_genel, ax_genel = plt.subplots(figsize=(8, 3.5))
+            etiketler_genel = ["Ürün Zorluğu", "Tonaj", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
+            
+            sirali_indeksler_g = np.argsort(onem_yuzdeleri)[::-1]
+            sirali_yuzdeler_g = onem_yuzdeleri[sirali_indeksler_g]
+            sirali_etiketler_g = [etiketler_genel[i] for i in sirali_indeksler_g]
+            
+            ax_genel.barh(sirali_etiketler_g[::-1], sirali_yuzdeler_g[::-1], color='darkorange', edgecolor='black')
+            ax_genel.set_xlabel("Genel Etki Yüzdesi (%)")
+            
+            for index, value in enumerate(sirali_yuzdeler_g[::-1]):
+                ax_genel.text(value + 0.5, index, f"%{value:.1f}", va='center')
+                
+            st.pyplot(fig_genel)
 
 except ValueError as ve: st.warning(f"⚠️ Dosya Yükleme Hatası: {ve}")
 except Exception as e: st.error(f"Bir hata oluştu: {e}")
