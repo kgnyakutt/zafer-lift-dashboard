@@ -22,7 +22,7 @@ ZORLUK_HARITASI = {
     "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
     "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
     "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
-    "EYP1A": 1.0, "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
+    "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
     "DÜZRAMPA": 1.0, "MENTEŞELİRAMPA": 2.0, "MENLİFT": 2.5, 
     "1MAKASLI": 3.0, "2MAKASLI": 4.5, "3MAKASLI": 6.0,
     "1KOLONLU": 3.5, "2KOLONLU": 5.0, "4KOLONLU": 8.0,
@@ -33,6 +33,23 @@ MAKSIMUM_CARPAN_TONAJ = 2.0
 MAKSIMUM_CARPAN_M2 = 1.3       
 MAKSIMUM_CARPAN_TEKNIK = 1.5   
 
+# --- YENİ EKLENEN: KATEGORİ AYIRICI FONKSİYON ---
+MAKASLI_KODLAR = [
+    "EYP1Ç", "EYP2", "EYP3", "EYP1", "EAP2", "EYP1U", 
+    "EYP4", "EYP1S12", "EYP1S11", "EAP1", "EYP1T", 
+    "EEP3", "EYP1H", "EYP1A", "EEP2", "EEP1", 
+    "PYM157ÖZEL", "EYP2H", "HR"
+]
+
+def urun_makasli_mi(urun):
+    urun_str = str(urun).upper().replace("İ", "I").replace("ı", "I")
+    if "MAKASLI" in urun_str: 
+        return True
+    for kod in MAKASLI_KODLAR:
+        if kod in urun_str:
+            return True
+    return False
+
 # --- KENAR ÇUBUĞU DOSYA VE KATEGORİ YÖNETİMİ ---
 st.sidebar.header("📁 Veri Yönetimi")
 yuklenen_dosya = st.sidebar.file_uploader("Excel Dosyası Yükle (.xlsx)", type=["xlsx"])
@@ -41,7 +58,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("🏗️ Üretim Kategorisi")
 secilen_kategori = st.sidebar.radio(
     "Hangi üretim tipini incelemek istiyorsunuz?",
-    ["Tümü (Genel Analiz)", "Makaslı Platformlar", "Asansörler ve Diğer"]
+    ["Tümü (Genel Analiz)", "Makaslı Üretimler (Makaslılar, EYP, EEP vb.)", "Asansör ve Diğerleri (Kolonlu, HYM, Rampa vb.)"]
 )
 
 # --- VERİ İŞLEME ---
@@ -50,29 +67,25 @@ def veri_isle(dosya_kaynagi):
     def urun_normalize(deger):
         if pd.isna(deger): return deger
         s = str(deger).strip().upper()
-        # Türkçe i/ı dönüşümlerini garanti altına almak için ufak bir temizlik
         s = s.replace("İ", "I").replace("ı", "I") 
         return re.sub(r'[\s\.\-]+', '', s)
 
-    # --- YENİ EKLENEN: AKILLI ÖZEL ÜRETİM TANIMA SİSTEMİ ---
     def dinamik_zorluk(urun):
         if pd.isna(urun): return 1.0
         urun_str = str(urun).upper()
         
         if urun_str in ZORLUK_HARITASI:
             return ZORLUK_HARITASI[urun_str]
-        
-        # İçinde ÖZEL kelimesi geçiyorsa standart dışı imalat
+            
+        if any(kod in urun_str for kod in ["EYP", "HYM", "EEP", "EAP"]):
+            return 2.5
+            
         if "ÖZEL" in urun_str or "OZEL" in urun_str:
-            if "MAKASLI" in urun_str:
-                return 6.5  # Özel makaslılar en zoru
-            elif "KOLONLU" in urun_str:
-                return 6.0
+            if "MAKASLI" in urun_str: return 6.5
+            elif "KOLONLU" in urun_str: return 6.0
             return 3.0
             
-        # Tamamen yeni ve bilinmeyen bir modelse
         return 1.5
-    # -------------------------------------------------------
 
     def tonaj_ayikla(deger):
         if pd.isna(deger) or str(deger).strip() == '': return 1.0
@@ -112,8 +125,6 @@ def veri_isle(dosya_kaynagi):
     df = df[[col for col in hedef_sutunlar if col in df.columns]]
 
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
-    
-    # Akıllı Zorluk Fonksiyonunu Devreye Sokuyoruz
     df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].apply(dinamik_zorluk)
 
     df["Çelik Durumu (1/0)"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0)
@@ -172,12 +183,11 @@ def yapay_zeka_egit(df_model):
 try:
     df_raw = veri_isle(yuklenen_dosya)
     
-    # 1. KATEGORİYE GÖRE VERİYİ FİLTRELEME (TÜRKÇE KARAKTER HATASI GİDERİLDİ)
-    # Ürün çeşidi en başta .upper() ile büyütüldüğü için direkt "MAKASLI" aranır.
-    if secilen_kategori == "Makaslı Platformlar":
-        df = df_raw[df_raw["Ürün Çeşidi"].str.contains("MAKASLI", na=False)].copy()
-    elif secilen_kategori == "Asansörler ve Diğer":
-        df = df_raw[~df_raw["Ürün Çeşidi"].str.contains("MAKASLI", na=False)].copy()
+    # 1. YENİ KATEGORİZASYON MANTIĞI İLE FİLTRELEME
+    if "Makaslı Üretimler" in secilen_kategori:
+        df = df_raw[df_raw["Ürün Çeşidi"].apply(urun_makasli_mi)].copy()
+    elif "Asansör ve Diğerleri" in secilen_kategori:
+        df = df_raw[~df_raw["Ürün Çeşidi"].apply(urun_makasli_mi)].copy()
     else:
         df = df_raw.copy()
 
@@ -186,18 +196,18 @@ try:
         min_tonaj, max_tonaj = df["Tonaj"].min(), df["Tonaj"].max()
         df["Normalize_Tonaj"] = 1.0 if max_tonaj == min_tonaj else 1.0 + ((df["Tonaj"] - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0)
         
-        makasli_mask = df["Ürün Çeşidi"].str.contains("MAKASLI", na=False)
-        min_m2, max_m2 = (df.loc[makasli_mask, "Metrekare (m2)"].min(), df.loc[makasli_mask, "Metrekare (m2)"].max()) if makasli_mask.any() else (1.0, 1.0)
+        makasli_mask_local = df["Ürün Çeşidi"].apply(urun_makasli_mi)
+        min_m2, max_m2 = (df.loc[makasli_mask_local, "Metrekare (m2)"].min(), df.loc[makasli_mask_local, "Metrekare (m2)"].max()) if makasli_mask_local.any() else (1.0, 1.0)
 
         def m2_normalize_hesapla(row):
-            if "MAKASLI" in str(row["Ürün Çeşidi"]) and max_m2 > min_m2:
+            if urun_makasli_mi(row["Ürün Çeşidi"]) and max_m2 > min_m2:
                 return 1.0 + ((row["Metrekare (m2)"] - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0)
             return 1.0 
         df["Normalize_Metrekare"] = df.apply(m2_normalize_hesapla, axis=1)
         
         df["Normalize_Teknik"] = 1.0 + ((df["Teknik Puan"] - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
     else:
-        st.error("Bu kategoride hiç veri bulunamadı! Lütfen sol menüden başka bir kategori seçin veya Excel dosyanızı kontrol edin.")
+        st.error("Bu kategoride hiç veri bulunamadı! Lütfen sol menüden başka bir kategori seçin.")
         st.stop()
 
     # 3. YALNIZCA SEÇİLEN KATEGORİ İLE YAPAY ZEKA EĞİTİMİ
@@ -217,14 +227,14 @@ try:
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Ürün Analizi", "👷 Operatör Puanı", "🤖 Yapay Zeka Tahmini", "🏭 Fabrika Karakteristiği"])
     
     with tab1:
-        st.subheader(f"Üretim Özeti ({secilen_kategori})")
+        st.subheader(f"Üretim Özeti")
         if not df_filtred.empty:
             grup_ozet = df_filtred.groupby(["Ürün Çeşidi", "Zorluk Katsayısı"]).agg({"Üretim Adedi": ["sum", "mean"], "Teslim Süresi (Gün)": "mean", "Sipariş No": "count" if "Sipariş No" in df_filtred.columns else lambda x: len(x)}).reset_index()
             grup_ozet.columns = ["Ürün Çeşidi", "Katsayı", "Toplam", "Ortalama", "Ortalama Süre (Gün)", "Sipariş Sayısı"]
             st.dataframe(grup_ozet, use_container_width=True)
 
     with tab2:
-        st.subheader(f"Operatör Performans Puanları ({secilen_kategori})")
+        st.subheader(f"Operatör Performans Puanları")
         if not df_filtred.empty:
             df_op = df_filtred.copy()
             df_op['Operatörler'] = df_op['Operatörler'].str.split(',')
@@ -239,8 +249,8 @@ try:
             st.dataframe(op_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
 
     with tab3:
-        st.subheader(f"🔮 Makine Öğrenmesi Tahmini ({secilen_kategori})")
-        st.markdown("Arka plandaki Yapay Zeka modeli, şu an sadece sol menüde seçtiğiniz kategoriye (Asansör veya Makaslı) ait geçmiş siparişleri baz alarak optimize edilmiştir.")
+        st.subheader(f"🔮 Makine Öğrenmesi Tahmini")
+        st.markdown("Arka plandaki Yapay Zeka modeli, şu an sadece sol menüde seçtiğiniz kategoriye ait geçmiş siparişleri baz alarak optimize edilmiştir.")
         
         if regressor is None:
             st.warning("Modeli eğitmek için bu kategoride yeterli sipariş geçmişi bulunamadı (En az 5 sipariş gerekli).")
@@ -261,20 +271,19 @@ try:
                 input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
                 
             if st.button("🚀 Üretim Süresini Tahmin Et ve Analiz Çıkar", type="primary"):
-                # Manuel girişte de aynı akıllı zorluk fonksiyonunu kullanalım
-                def dinamik_zorluk(urun):
-                    if pd.isna(urun): return 1.0
+                def dinamik_zorluk_manuel(urun):
                     urun_str = str(urun).upper()
                     if urun_str in ZORLUK_HARITASI: return ZORLUK_HARITASI[urun_str]
+                    if any(kod in urun_str for kod in ["EYP", "HYM", "EEP", "EAP"]): return 2.5
                     if "ÖZEL" in urun_str or "OZEL" in urun_str:
                         if "MAKASLI" in urun_str: return 6.5
                         elif "KOLONLU" in urun_str: return 6.0
                         return 3.0
                     return 1.5
                     
-                zorluk = dinamik_zorluk(input_urun)
+                zorluk = dinamik_zorluk_manuel(input_urun)
                 norm_tonaj = 1.0 + ((input_tonaj - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0) if max_tonaj > min_tonaj else 1.0
-                norm_m2 = 1.0 + ((input_m2 - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if "MAKASLI" in input_urun and max_m2 > min_m2 else 1.0
+                norm_m2 = 1.0 + ((input_m2 - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if urun_makasli_mi(input_urun) and max_m2 > min_m2 else 1.0
                 norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
                 celik_carp = input_celik + 1.0
                 korkuluk_carp = 1.75 if input_korkuluk == "Sac" else 1.0
@@ -320,7 +329,7 @@ try:
                 elif en_buyuk_etken == "Tonaj":
                     st.info("Bu siparişte **Tonaj (Ağırlık) kaynaklı** ciddi bir süre artışı var. Atölyedeki vinç ve malzeme taşıma hatlarının bu siparişe göre önceden rezerve edilmesi önerilir.")
                 elif en_buyuk_etken == "Ürün Zorluğu":
-                    st.info(f"Süreyi en çok seçtiğiniz ürün tipinin (**{input_urun}**) imalat zorluğu etkiliyor. Standart bir üretim kalıbı kullanmanız hız kazandırabilir. Özel imalatsa tedarik sürecini erkenden başlatın.")
+                    st.info(f"Süreyi en çok seçtiğiniz ürün tipinin (**{input_urun}**) imalat zorluğu etkiliyor. Bu özel üretim serisi için kalıp ve aparat hazırlıklarını erkenden başlatın.")
                 elif en_buyuk_etken == "Çelik Kullanımı":
                     st.info("Çelik kullanımı kaynak ve işleme sürelerini uzatmaktadır. Kaynak istasyonlarının hazır bulunduğundan emin olun.")
                 elif en_buyuk_etken == "Korkuluk Kaplama":
@@ -329,8 +338,8 @@ try:
                     st.success("Sipariş parametreleri oldukça dengeli görünüyor. Standart üretim planınıza uyabilirsiniz.")
 
     with tab4:
-        st.subheader(f"🏭 {secilen_kategori} - Genel Üretim Karakteristiği")
-        st.markdown(f"Bu grafik, sol menüden seçtiğiniz **'{secilen_kategori}'** grubuna ait geçmiş siparişlerin analizini gösterir.")
+        st.subheader(f"🏭 Genel Üretim Karakteristiği")
+        st.markdown(f"Bu grafik, sol menüden seçtiğiniz üretim grubuna ait geçmiş siparişlerin analizini gösterir.")
         
         if regressor is not None:
             fig_genel, ax_genel = plt.subplots(figsize=(8, 3.5))
