@@ -105,11 +105,19 @@ def veri_isle(dosya_kaynagi):
         if match: return float(match.group())
         return 1.0
         
-    def korkuluk_ayikla(deger):
-        if pd.isna(deger): return 1.0
-        s = str(deger).lower().strip()
-        if "sac" in s: return 1.75
-        return 1.0
+    def korkuluk_hesapla(deger, urun):
+        if pd.isna(deger): 
+            s = ""
+        else:
+            s = str(deger).lower().strip()
+            
+        if urun_makasli_mi(urun):
+            if "sac" in s: return 1.75
+            elif "tel" in s: return 1.3
+            else: return 1.0
+        else:
+            if "sac" in s: return 1.75
+            else: return 1.0
 
     if dosya_kaynagi is not None: df = pd.read_excel(dosya_kaynagi)
     else: df = pd.read_excel("personel_listesi.xlsx") 
@@ -119,15 +127,20 @@ def veri_isle(dosya_kaynagi):
     df = df[[col for col in hedef_sutunlar if col in df.columns]]
 
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
-    df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].apply(dinamik_zorluk)
+    
+    if "Korkuluk Kaplama" not in df.columns:
+        df["Korkuluk Kaplama"] = "Tel"
+    df["Korkuluk Çarpanı"] = df.apply(lambda row: korkuluk_hesapla(row["Korkuluk Kaplama"], row["Ürün Çeşidi"]), axis=1)
+    df["Zorluk Katsayısı"] = df["Ürün Çeşidi"].apply(dinamik_zorluk) * df["Korkuluk Çarpanı"]
+
     df["Çelik Durumu (1/0)"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0)
     df["Çelik Çarpanı"] = df["Çelik Durumu (1/0)"] + 1.0
     df["Tonaj"] = df.get("Tonaj", pd.Series([1.0]*len(df))).apply(tonaj_ayikla).replace(0, 1.0)
+    
     if "Metrekare (m2)" not in df.columns and "Metrekare" in df.columns: df["Metrekare (m2)"] = df["Metrekare"]
     df["Metrekare (m2)"] = df.get("Metrekare (m2)", pd.Series([1.0]*len(df))).apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df.get("Teknik Puan", 1.0), errors='coerce').fillna(1.0)
-    df["Korkuluk Kaplama"] = df.get("Korkuluk Kaplama", pd.Series(["Tel"]*len(df)))
-    df["Korkuluk Çarpanı"] = df["Korkuluk Kaplama"].apply(korkuluk_ayikla)
+    
     df["Sipariş Başlangıç Tarihi"] = pd.to_datetime(df["Sipariş Başlangıç"], dayfirst=True, errors='coerce')
     df["Sipariş Çıkış Tarihi"] = pd.to_datetime(df["Sipariş Çıkış(Boya Hariç)"], dayfirst=True, errors='coerce')
     df["Teslim Süresi (Gün)"] = (df["Sipariş Çıkış Tarihi"] - df["Sipariş Başlangıç Tarihi"]).dt.days
@@ -140,7 +153,7 @@ def veri_isle(dosya_kaynagi):
 # --- MAKİNE ÖĞRENMESİ MODELİ & ETKİ ANALİZİ ---
 @st.cache_resource
 def yapay_zeka_egit(df_model):
-    X_cols = ["Zorluk Katsayısı", "Normalize_Tonaj", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı", "Korkuluk Çarpanı"]
+    X_cols = ["Zorluk Katsayısı", "Normalize_Tonaj", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
     Y_col = "Teslim Süresi (Gün)"
     df_model = df_model.dropna(subset=[Y_col] + X_cols).copy()
     df_model = df_model[df_model[Y_col] > 0]
@@ -160,6 +173,13 @@ def yapay_zeka_egit(df_model):
     X_train_poly = poly.fit_transform(X_train_scaled)
     regressor.fit(X_train_poly, y_train)
     return regressor, sc, poly, onem_yuzdeleri
+
+# --- YENİ EKLENEN: DOĞAL SIRALAMA (NATURAL SORT) FONKSİYONU ---
+def dogal_siralama_anahtari(x):
+    # Bu fonksiyon kelimelerin içindeki sayıları bütün olarak algılar.
+    # Örneğin: EYP2, EYP10'dan önce gelir.
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(x))]
+# ----------------------------------------------------------------
 
 # --- ANA UYGULAMA ---
 try:
@@ -203,8 +223,6 @@ try:
     
     with tab1:
         st.subheader("Üretim Özeti")
-        
-        # 1. Seçili kategoriye göre haritadaki tüm olası makine isimlerini al
         if "Makaslı Üretimler" in secilen_kategori:
             beklenen_urunler = [u for u in ZORLUK_HARITASI.keys() if urun_makasli_mi(u)]
         elif "Asansör ve Diğerleri" in secilen_kategori:
@@ -212,36 +230,34 @@ try:
         else:
             beklenen_urunler = list(ZORLUK_HARITASI.keys())
             
-        # 2. Hiç üretimi olmayan makineler için varsayılan (0 dolu) bir tablo oluştur
         base_df = pd.DataFrame({"Ürün Çeşidi": beklenen_urunler})
-        base_df["Katsayı"] = base_df["Ürün Çeşidi"].map(ZORLUK_HARITASI)
+        base_df["Katsayı (Ortalama)"] = base_df["Ürün Çeşidi"].map(ZORLUK_HARITASI)
         base_df["Toplam"] = 0
         base_df["Ortalama"] = 0.0
         base_df["Ortalama Süre (Gün)"] = 0.0
         base_df["Sipariş Sayısı"] = 0
         
-        # 3. Gerçek üretimleri hesapla
         if not df_filtred.empty:
-            grup_ozet = df_filtred.groupby(["Ürün Çeşidi", "Zorluk Katsayısı"]).agg({
+            grup_ozet = df_filtred.groupby(["Ürün Çeşidi"]).agg({
+                "Zorluk Katsayısı": "mean",
                 "Üretim Adedi": ["sum", "mean"], 
                 "Teslim Süresi (Gün)": "mean", 
                 "Sipariş No": "count" if "Sipariş No" in df_filtred.columns else lambda x: len(x)
             }).reset_index()
-            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı", "Toplam", "Ortalama", "Ortalama Süre (Gün)", "Sipariş Sayısı"]
-            
-            # 4. Gerçekleri ve Boş Şablonu Üst Üste Ekle (Aynı makineden varsa gerçeği tut)
+            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı (Ortalama)", "Toplam", "Ortalama", "Ortalama Süre (Gün)", "Sipariş Sayısı"]
             merged_df = pd.concat([grup_ozet, base_df]).drop_duplicates(subset=["Ürün Çeşidi"], keep='first').reset_index(drop=True)
         else:
             merged_df = base_df
             
-        # 5. Görsel Düzenlemeler (Eksik verileri sıfırla ve tabloyu sırala)
         merged_df["Toplam"] = merged_df["Toplam"].fillna(0).astype(int)
         merged_df["Sipariş Sayısı"] = merged_df["Sipariş Sayısı"].fillna(0).astype(int)
+        merged_df["Katsayı (Ortalama)"] = merged_df["Katsayı (Ortalama)"].fillna(1.0).round(2)
         merged_df["Ortalama"] = merged_df["Ortalama"].fillna(0.0).round(2)
         merged_df["Ortalama Süre (Gün)"] = merged_df["Ortalama Süre (Gün)"].fillna(0.0).round(2)
         
-        # En çok üretilenler üstte dursun, hiç üretilmeyenler (0 olanlar) zorluk puanlarına göre en altta dizilsin
-        merged_df = merged_df.sort_values(by=["Sipariş Sayısı", "Katsayı"], ascending=[False, True]).reset_index(drop=True)
+        # TABLO 1: ÜRÜN İSMİNE GÖRE DOĞAL SIRALAMA (EAP1, EAP2, EEP1, EYP1, EYP2...)
+        merged_df["Siralama_Anahtari"] = merged_df["Ürün Çeşidi"].apply(dogal_siralama_anahtari)
+        merged_df = merged_df.sort_values(by=["Siralama_Anahtari"]).drop(columns=["Siralama_Anahtari"]).reset_index(drop=True)
         
         st.dataframe(merged_df, use_container_width=True)
 
@@ -253,7 +269,7 @@ try:
             df_op = df_op.explode('Operatörler')
             df_op['Operatörler'] = df_op['Operatörler'].str.strip()
             df_op = df_op[df_op['Operatörler'] != '']
-            df_op['Toplam Puan'] = (df_op['Üretim Adedi'] * df_op['Zorluk Katsayısı'] * df_op['Normalize_Tonaj'] * df_op['Çelik Çarpanı'] * df_op['Normalize_Metrekare'] * df_op['Normalize_Teknik'] * df_op['Korkuluk Çarpanı'])
+            df_op['Toplam Puan'] = (df_op['Üretim Adedi'] * df_op['Zorluk Katsayısı'] * df_op['Normalize_Tonaj'] * df_op['Çelik Çarpanı'] * df_op['Normalize_Metrekare'] * df_op['Normalize_Teknik'])
             df_op['Kişi Başı Puan'] = df_op['Toplam Puan'] / df_op['Kişi Sayısı']
             op_ozet = df_op.groupby("Operatörler").agg({"Kişi Başı Puan": "sum"}).reset_index()
             op_ozet["Kişi Başı Puan"] = round(op_ozet["Kişi Başı Puan"], 1)
@@ -266,13 +282,22 @@ try:
             st.warning("Modeli eğitmek için bu kategoride yeterli sipariş geçmişi bulunamadı (En az 5 sipariş gerekli).")
         else:
             col1, col2 = st.columns(2)
-            dinamik_urunler = sorted(df["Ürün Çeşidi"].unique().tolist())
-            if not dinamik_urunler: dinamik_urunler = list(ZORLUK_HARITASI.keys())
+            
+            # SEÇME KUTUSU (DROPDOWN) İÇİN DE DOĞAL SIRALAMA
+            dinamik_urunler = sorted(df["Ürün Çeşidi"].unique().tolist(), key=dogal_siralama_anahtari)
+            if not dinamik_urunler: 
+                dinamik_urunler = sorted(list(ZORLUK_HARITASI.keys()), key=dogal_siralama_anahtari)
+            
             with col1:
                 input_urun = st.selectbox("Ürün Çeşidi", dinamik_urunler)
                 input_tonaj = st.number_input("Tonaj (Ton)", value=1.0, min_value=0.1)
                 input_m2 = st.number_input("Ebat (Metrekare)", value=1.0, min_value=0.1)
-                input_korkuluk = st.selectbox("Korkuluk Kaplama", ["Tel / Yok (Standart)", "Sac"])
+                
+                if urun_makasli_mi(input_urun):
+                    input_korkuluk = st.selectbox("Korkuluk Kaplama", ["Düz (Standart)", "Tel", "Sac"])
+                else:
+                    input_korkuluk = st.selectbox("Korkuluk Kaplama", ["Tel / Yok (Standart)", "Sac"])
+
             with col2:
                 input_kisi = st.number_input("Ekipteki Operatör Sayısı", min_value=1, value=1)
                 input_teknik = st.slider("Teknik Zorluk Puanı", min_value=1.0, max_value=10.0, value=1.0)
@@ -289,23 +314,34 @@ try:
                         return 3.0
                     return 1.5
                     
-                zorluk = dinamik_zorluk_manuel(input_urun)
+                ham_zorluk = dinamik_zorluk_manuel(input_urun)
+                
+                if urun_makasli_mi(input_urun):
+                    if input_korkuluk == "Sac": korkuluk_carp = 1.75
+                    elif input_korkuluk == "Tel": korkuluk_carp = 1.3
+                    else: korkuluk_carp = 1.0
+                else:
+                    if input_korkuluk == "Sac": korkuluk_carp = 1.75
+                    else: korkuluk_carp = 1.0
+                    
+                birlesik_zorluk = ham_zorluk * korkuluk_carp
+                
                 norm_tonaj = 1.0 + ((input_tonaj - min_tonaj) / (max_tonaj - min_tonaj)) * (MAKSIMUM_CARPAN_TONAJ - 1.0) if max_tonaj > min_tonaj else 1.0
                 norm_m2 = 1.0 + ((input_m2 - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if urun_makasli_mi(input_urun) and max_m2 > min_m2 else 1.0
                 norm_teknik = 1.0 + ((input_teknik - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
                 celik_carp = input_celik + 1.0
-                korkuluk_carp = 1.75 if input_korkuluk == "Sac" else 1.0
                 
-                ham_veri = np.array([[zorluk, norm_tonaj, norm_m2, norm_teknik, celik_carp, input_kisi, korkuluk_carp]])
+                ham_veri = np.array([[birlesik_zorluk, norm_tonaj, norm_m2, norm_teknik, celik_carp, input_kisi]])
                 veri_scaled = sc.transform(ham_veri)
                 veri_poly = poly.transform(veri_scaled)
                 tahmini_gun = max(regressor.predict(veri_poly)[0], 1.0)
                 st.success(f"### 🎉 Beklenen Üretim Süresi: **{tahmini_gun:.1f} Gün**")
                 
-                yerel_carpanlar = np.array([zorluk, norm_tonaj, norm_m2, norm_teknik, celik_carp, (3.0 / input_kisi), korkuluk_carp])
+                yerel_carpanlar = np.array([birlesik_zorluk, norm_tonaj, norm_m2, norm_teknik, celik_carp, (3.0 / input_kisi)])
                 yerel_etkiler = yerel_carpanlar * onem_yuzdeleri
                 yerel_yuzdeler = (yerel_etkiler / np.sum(yerel_etkiler)) * 100
-                etiketler = ["Ürün Zorluğu", "Tonaj", "Ebat (m²)", "Teknik Detaylar", "Çelik Kullanımı", "Ekip Yetersizliği", "Korkuluk Kaplama"]
+                
+                etiketler = ["Ürün Zorluğu (Korkuluk Dahil)", "Tonaj", "Ebat (m²)", "Teknik Detaylar", "Çelik Kullanımı", "Ekip Yetersizliği"]
                 
                 st.markdown("---")
                 st.subheader("🎯 Bu Makineyi En Çok Ne Yavaşlatıyor?")
@@ -325,9 +361,9 @@ try:
                 if en_buyuk_etken == "Teknik Detaylar": st.warning("Bu siparişin süresini en çok **Teknik Detayların (Puanın) yüksekliği** uzatıyor. Üretime tecrübeli ustaların atanması önerilir.")
                 elif en_buyuk_etken == "Ekip Yetersizliği": st.warning(f"Süreyi en çok **Ekip Sayısının ({input_kisi} kişi) az olması** uzatıyor. Operatör eklerseniz üretim ciddi oranda hızlanır.")
                 elif en_buyuk_etken == "Tonaj": st.info("Bu siparişte **Tonaj (Ağırlık) kaynaklı** süre artışı var. Atölyedeki vinç hatlarının rezerve edilmesi önerilir.")
-                elif en_buyuk_etken == "Ürün Zorluğu": st.info(f"Süreyi en çok ürün tipinin (**{input_urun}**) zorluğu etkiliyor. Kalıp ve aparat hazırlıklarını erkenden başlatın.")
+                elif en_buyuk_etken == "Ürün Zorluğu (Korkuluk Dahil)": 
+                    st.info(f"Süreyi en çok **{input_urun}** şasisinin ve seçtiğiniz **{input_korkuluk}** kaplamasının birleşik zorluğu etkiliyor. Kalıp, aparat ve özellikle sac/tel işçiliği hazırlıklarını erkenden başlatın.")
                 elif en_buyuk_etken == "Çelik Kullanımı": st.info("Çelik kullanımı kaynak sürelerini uzatmaktadır. Kaynak istasyonlarının hazır bulunduğundan emin olun.")
-                elif en_buyuk_etken == "Korkuluk Kaplama": st.info("Sac korkuluk imalatı süreyi uzatıyor. Sac kesim-büküm istasyonlarındaki iş yükünü hafifletin.")
                 else: st.success("Sipariş parametreleri oldukça dengeli görünüyor.")
 
     with tab4:
@@ -335,7 +371,7 @@ try:
         st.markdown("Bu grafik, sol menüden seçtiğiniz üretim grubuna ait geçmiş siparişlerin analizini gösterir.")
         if regressor is not None:
             fig_genel, ax_genel = plt.subplots(figsize=(8, 3.5))
-            etiketler_genel = ["Ürün Zorluğu", "Tonaj", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı", "Korkuluk Kaplama"]
+            etiketler_genel = ["Ürün Zorluğu (Korkuluk Dahil)", "Tonaj", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
             sirali_indeksler_g = np.argsort(onem_yuzdeleri)[::-1]
             sirali_yuzdeler_g = onem_yuzdeleri[sirali_indeksler_g]
             sirali_etiketler_g = [etiketler_genel[i] for i in sirali_indeksler_g]
