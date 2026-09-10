@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 import warnings
+from sklearn.ensemble import RandomForestRegressor
 warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması
@@ -113,6 +114,8 @@ def veri_isle(dosya_kaynagi):
 
 # --- MAKİNE ÖĞRENMESİ MODELİ & ETKİ ANALİZİ ---
 @st.cache_resource
+# --- MAKİNE ÖĞRENMESİ MODELİ & ETKİ ANALİZİ ---
+@st.cache_resource
 def yapay_zeka_egit(df):
     X_cols = ["Zorluk Katsayısı", "Normalize_Tonaj", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
     Y_col = "Teslim Süresi (Gün)"
@@ -129,13 +132,12 @@ def yapay_zeka_egit(df):
     sc = StandardScaler()
     X_train_scaled = sc.fit_transform(X_train)
     
-    # 1. YENİ EKLENEN KISIM: Etki analizi için doğrusal ağırlık hesaplama
-    base_lr = LinearRegression()
-    base_lr.fit(X_train_scaled, y_train)
-    onem_dereceleri = np.abs(base_lr.coef_)
-    onem_yuzdeleri = (onem_dereceleri / np.sum(onem_dereceleri)) * 100
+    # 1. YENİ: Etki analizi için RANDOM FOREST kullanımı (Çok daha gerçekçi ve dengeli sonuç verir)
+    rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+    rf_model.fit(X_train_scaled, y_train)
+    onem_yuzdeleri = rf_model.feature_importances_ * 100
     
-    # 2. Asıl Tahmin Modeli (2. Derece Polinom Regresyonu)
+    # 2. Asıl Tahmin Modeli (2. Derece Polinom Regresyonu - mevcut)
     poly = PolynomialFeatures(degree=2, include_bias=False)
     regressor = LinearRegression()
     X_train_poly = poly.fit_transform(X_train_scaled)
