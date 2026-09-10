@@ -120,7 +120,7 @@ def veri_isle(dosya_kaynagi):
             else: return 1.0
 
     if dosya_kaynagi is not None: df = pd.read_excel(dosya_kaynagi)
-    else: df = pd.read_excel("personel_listesi.xlsx") 
+    else: df = pd.read_excel("personel_listesi_kapasiteli.xlsx") 
         
     df.columns = df.columns.str.strip()
     
@@ -176,11 +176,27 @@ def yapay_zeka_egit(df_model):
     regressor.fit(X_train_poly, y_train)
     return regressor, sc, poly, onem_yuzdeleri
 
-# --- DOĞAL SIRALAMA (NATURAL SORT) FONKSİYONU ---
-def dogal_siralama_anahtari(x):
-    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(x))]
+# --- GÜNCELLENMİŞ: AİLE BAZLI AKILLI SIRALAMA FONKSİYONU ---
+def aile_bazli_siralama(urun):
+    u = str(urun).upper().strip()
+    
+    # 1. Önce ürün grubunu (ailesini) belirleyip bir öncelik skoru verelim
+    if "EAP" in u: prefix_score = 1
+    elif "EEP" in u: prefix_score = 2
+    elif "EYP" in u: prefix_score = 3
+    elif "HYM" in u: prefix_score = 4
+    elif "MAKASLI" in u: prefix_score = 5
+    elif "KOLONLU" in u: prefix_score = 6
+    elif "RAMPA" in u or "MENLİFT" in u: prefix_score = 7
+    else: prefix_score = 8
+    
+    # 2. Ürünün içindeki sayıyı ayıklayalım (Örn: EYP3 -> 3)
+    sayi_match = re.search(r'\d+', u)
+    sayi = int(sayi_match.group()) if sayi_match else 0
+    
+    return (prefix_score, sayi, u)
 
-# --- TEZGAH SAYISAL SIRALAMA FONKSİYONU (1, 2, 3, 4, 5...) ---
+# --- TEZGAH SAYISAL SIRALAMA FONKSİYONU ---
 def tezgah_siralama_anahtari(x):
     try:
         return (0, int(x))
@@ -221,11 +237,9 @@ try:
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Operatör & Tezgah Filtresi")
     
-    # TEZGAHLAR SAYISAL OLARAK SIRALANDI (1, 2, 3, 4, 5...)
     tezgahlar_sirali = sorted(list(df["Tezgah"].dropna().unique()), key=tezgah_siralama_anahtari)
     secilen_tezgah = st.sidebar.selectbox("Tezgah Seçin", ["Tümü"] + tezgahlar_sirali)
     
-    # OPERATÖRLER ALFABETİK OLARAK SIRALANDI
     tum_operatorler = sorted(list(set(op.strip() for ops in df["Operatörler"].dropna() for op in ops.split(',') if op.strip())))
     secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + tum_operatorler)
     
@@ -269,7 +283,8 @@ try:
         merged_df["Ortalama"] = merged_df["Ortalama"].fillna(0.0).round(2)
         merged_df["Ortalama Süre (Gün)"] = merged_df["Ortalama Süre (Gün)"].fillna(0.0).round(2)
         
-        merged_df["Siralama_Anahtari"] = merged_df["Ürün Çeşidi"].apply(dogal_siralama_anahtari)
+        # TABLO 1: AİLE BAZLI SIRALAMA UYGULANIYOR
+        merged_df["Siralama_Anahtari"] = merged_df["Ürün Çeşidi"].apply(aile_bazli_siralama)
         merged_df = merged_df.sort_values(by=["Siralama_Anahtari"]).drop(columns=["Siralama_Anahtari"]).reset_index(drop=True)
         
         st.dataframe(merged_df, use_container_width=True)
@@ -295,9 +310,11 @@ try:
             st.warning("Modeli eğitmek için bu kategoride yeterli sipariş geçmişi bulunamadı (En az 5 sipariş gerekli).")
         else:
             col1, col2 = st.columns(2)
-            dinamik_urunler = sorted(df["Ürün Çeşidi"].unique().tolist(), key=dogal_siralama_anahtari)
+            
+            # SEÇME KUTUSU (DROPDOWN) İÇİN DE AİLE BAZLI SIRALAMA
+            dinamik_urunler = sorted(df["Ürün Çeşidi"].unique().tolist(), key=aile_bazli_siralama)
             if not dinamik_urunler: 
-                dinamik_urunler = sorted(list(ZORLUK_HARITASI.keys()), key=dogal_siralama_anahtari)
+                dinamik_urunler = sorted(list(ZORLUK_HARITASI.keys()), key=aile_bazli_siralama)
             
             with col1:
                 input_urun = st.selectbox("Ürün Çeşidi", dinamik_urunler)
@@ -382,7 +399,7 @@ try:
         st.markdown("Bu grafik, sol menüden seçtiğiniz üretim grubuna ait geçmiş siparişlerin analizini gösterir.")
         if regressor is not None:
             fig_genel, ax_genel = plt.subplots(figsize=(8, 3.5))
-            etiketler_genel = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
+            etiketler_genel = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Puan", "Çelik Kullanımı", "Ekip Sayısı"]
             sirali_indeksler_g = np.argsort(onem_yuzdeleri)[::-1]
             sirali_yuzdeler_g = onem_yuzdeleri[sirali_indeksler_g]
             sirali_etiketler_g = [etiketler_genel[i] for i in sirali_indeksler_g]
