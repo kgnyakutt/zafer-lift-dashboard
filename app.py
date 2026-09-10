@@ -4,8 +4,7 @@ import re
 import streamlit as st
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, PolynomialFeatures
-from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 import warnings
 warnings.filterwarnings("ignore")
@@ -57,10 +56,9 @@ secilen_kategori = st.sidebar.radio(
     ["Tümü (Genel Analiz)", "Makaslı Üretimler (Makaslılar, EYP, EEP vb.)", "Asansör ve Diğerleri (Kolonlu, HYM, Rampa vb.)"]
 )
 
-# --- VERİ İŞLEME (GOOGLE SHEETS DOĞRUDAN CSV ÇEKME) ---
+# --- VERİ İŞLEME (BEKLEME SÜRESİ ENTEGRE EDİLMİŞTİR) ---
 @st.cache_data(ttl=60)
 def veri_isle():
-    # Senin Google Sheets linkin doğrudan entegre edildi:
     sheet_url = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv"
     
     try:
@@ -122,7 +120,7 @@ def veri_isle():
             else: return 1.0
 
     df.columns = df.columns.str.strip()
-    hedef_sutunlar = ["Sipariş No", "Ürün Çeşidi", "Çelik Durumu (1/0)", "Kapasite", "Metrekare", "Metrekare (m2)", "Teknik Puan", "Sipariş Başlangıç", "Sipariş Çıkış(Boya Hariç)", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk"]
+    hedef_sutunlar = ["Sipariş No", "Ürün Çeşidi", "Çelik Durumu (1/0)", "Kapasite", "Metrekare", "Metrekare (m2)", "Teknik Puan", "Sipariş Başlangıç", "Sipariş Çıkış(Boya Hariç)", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk", "Bekleme Süresi (Gün)"]
     df = df[[col for col in hedef_sutunlar if col in df.columns]]
 
     df["Ürün Çeşidi"] = df["Ürün Çeşidi"].apply(urun_normalize)
@@ -143,36 +141,50 @@ def veri_isle():
     
     df["Sipariş Başlangıç Tarihi"] = pd.to_datetime(df["Sipariş Başlangıç"], dayfirst=True, errors='coerce')
     df["Sipariş Çıkış Tarihi"] = pd.to_datetime(df["Sipariş Çıkış(Boya Hariç)"], dayfirst=True, errors='coerce')
-    df["Teslim Süresi (Gün)"] = (df["Sipariş Çıkış Tarihi"] - df["Sipariş Başlangıç Tarihi"]).dt.days
+    
+    df["Toplam Süre (Gün)"] = (df["Sipariş Çıkış Tarihi"] - df["Sipariş Başlangıç Tarihi"]).dt.days
+    df["Bekleme Süresi (Gün)"] = pd.to_numeric(df.get("Bekleme Süresi (Gün)", 0.0), errors='coerce').fillna(0.0)
+    
+    df["Net Üretim Süresi (Gün)"] = df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]
+    df["Net Üretim Süresi (Gün)"] = df["Net Üretim Süresi (Gün)"].apply(lambda x: max(x, 1.0))
+
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1)
     df['Kişi Sayısı'] = df['Kişi Sayısı'].replace(0, 1)
 
     return df
 
-# --- MAKİNE ÖĞRENMESİ MODELİ & ETKİ ANALİZİ ---
+# --- ÇİFTLİ YAPAY ZEKA MODELİ (NET SÜRE + BEKLEME SÜRESİ TAHMİNİ) ---
 @st.cache_resource
 def yapay_zeka_egit(df_model):
     X_cols = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Metrekare", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
-    Y_col = "Teslim Süresi (Gün)"
-    df_model = df_model.dropna(subset=[Y_col] + X_cols).copy()
-    df_model = df_model[df_model[Y_col] > 0]
+    
+    df_model = df_model.dropna(subset=["Net Üretim Süresi (Gün)", "Bekleme Süresi (Gün)"] + X_cols).copy()
+    df_model = df_model[df_model["Net Üretim Süresi (Gün)"] > 0]
     
     if len(df_model) < 5: return None, None, None, None
-    X = df_model[X_cols].values
-    y = df_model[Y_col].values
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+    X = df_model[X_cols].values
+    y_net = df_model["Net Üretim Süresi (Gün)"].values
+    y_bekleme = df_model["Bekleme Süresi (Gün)"].values
+    
+    X_train, X_test, y_net_train, y_net_test = train_test_split(X, y_net, test_size=0.25, random_state=42)
+    _, _, y_bek_train, y_bek_test = train_test_split(X, y_bekleme, test_size=0.25, random_state=42)
+    
     sc = StandardScaler()
     X_train_scaled = sc.fit_transform(X_train)
-    rf_model = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
-    rf_model.fit(X_train_scaled, y_train)
-    onem_yuzdeleri = rf_model.feature_importances_ * 100
-    poly = PolynomialFeatures(degree=2, include_bias=False)
-    regressor = LinearRegression()
-    X_train_poly = poly.fit_transform(X_train_scaled)
-    regressor.fit(X_train_poly, y_train)
-    return regressor, sc, poly, onem_yuzdeleri
+    
+    # Model 1: Aktif İmalat Süresi Tahmincisi
+    rf_net = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
+    rf_net.fit(X_train_scaled, y_net_train)
+    
+    # Model 2: Bekleme / Gecikme Süresi Tahmincisi
+    rf_bekleme = RandomForestRegressor(n_estimators=100, max_features='sqrt', random_state=42)
+    rf_bekleme.fit(X_train_scaled, y_bek_train)
+    
+    onem_yuzdeleri = rf_net.feature_importances_ * 100
+    
+    return rf_net, rf_bekleme, sc, onem_yuzdeleri
 
 # --- SIRALAMA FONKSİYONLARI ---
 def aile_bazli_siralama(urun):
@@ -222,7 +234,7 @@ try:
         st.error("Bu kategoride hiç veri bulunamadı! Lütfen sol menüden başka bir kategori seçin.")
         st.stop()
 
-    regressor, sc, poly, onem_yuzdeleri = yapay_zeka_egit(df)
+    rf_net, rf_bekleme, sc, onem_yuzdeleri = yapay_zeka_egit(df)
     
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Operatör & Tezgah Filtresi")
@@ -252,17 +264,17 @@ try:
         base_df["Katsayı (Ortalama)"] = base_df["Ürün Çeşidi"].map(ZORLUK_HARITASI)
         base_df["Toplam"] = 0
         base_df["Ortalama"] = 0.0
-        base_df["Ortalama Süre (Gün)"] = 0.0
+        base_df["Ortalama Toplam Süre (Gün)"] = 0.0
         base_df["Sipariş Sayısı"] = 0
         
         if not df_filtred.empty:
             grup_ozet = df_filtred.groupby(["Ürün Çeşidi"]).agg({
                 "Zorluk Katsayısı": "mean",
                 "Üretim Adedi": ["sum", "mean"], 
-                "Teslim Süresi (Gün)": "mean", 
+                "Toplam Süre (Gün)": "mean", 
                 "Sipariş No": "count" if "Sipariş No" in df_filtred.columns else lambda x: len(x)
             }).reset_index()
-            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı (Ortalama)", "Toplam", "Ortalama", "Ortalama Süre (Gün)", "Sipariş Sayısı"]
+            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı (Ortalama)", "Toplam", "Ortalama", "Ortalama Toplam Süre (Gün)", "Sipariş Sayısı"]
             merged_df = pd.concat([grup_ozet, base_df]).drop_duplicates(subset=["Ürün Çeşidi"], keep='first').reset_index(drop=True)
         else:
             merged_df = base_df
@@ -271,7 +283,7 @@ try:
         merged_df["Sipariş Sayısı"] = merged_df["Sipariş Sayısı"].fillna(0).astype(int)
         merged_df["Katsayı (Ortalama)"] = merged_df["Katsayı (Ortalama)"].fillna(1.0).round(2)
         merged_df["Ortalama"] = merged_df["Ortalama"].fillna(0.0).round(2)
-        merged_df["Ortalama Süre (Gün)"] = merged_df["Ortalama Süre (Gün)"].fillna(0.0).round(2)
+        merged_df["Ortalama Toplam Süre (Gün)"] = merged_df["Ortalama Toplam Süre (Gün)"].fillna(0.0).round(2)
         
         merged_df["Siralama_Anahtari"] = merged_df["Ürün Çeşidi"].apply(aile_bazli_siralama)
         merged_df = merged_df.sort_values(by=["Siralama_Anahtari"]).drop(columns=["Siralama_Anahtari"]).reset_index(drop=True)
@@ -279,7 +291,7 @@ try:
         st.dataframe(merged_df, use_container_width=True)
 
     with tab2:
-        st.subheader("Operatör Performans Puanları")
+        st.subheader("Operatör Performans Puanları (Gecikmelerden Arındırılmış)")
         if not df_filtred.empty:
             df_op = df_filtred.copy()
             df_op['Operatörler'] = df_op['Operatörler'].str.split(',')
@@ -293,9 +305,9 @@ try:
             st.dataframe(op_ozet.sort_values(by="Kişi Başı Puan", ascending=False), use_container_width=True)
 
     with tab3:
-        st.subheader("🔮 Makine Öğrenmesi Tahmini")
-        st.markdown("Arka plandaki Yapay Zeka modeli, Google Sheets üzerinden gelen canlı verilerle beslenmektedir.")
-        if regressor is None:
+        st.subheader("🔮 Makine Öğrenmesi Tahmini (Toplam Teslimat Süresi)")
+        st.markdown("Yapay zeka modeli hem **Net İmalat Süresini** hem de olası **Malzeme / Tedarik Bekleme Süresini** ayrı ayrı tahmin ederek toplam takvim gününü verir.")
+        if rf_net is None:
             st.warning("Modeli eğitmek için bu kategoride yeterli sipariş geçmişi bulunamadı (En az 5 sipariş gerekli).")
         else:
             col1, col2 = st.columns(2)
@@ -318,7 +330,7 @@ try:
                 input_teknik = st.slider("Teknik Zorluk Puanı", min_value=1.0, max_value=10.0, value=1.0)
                 input_celik = st.selectbox("Çelik Durumu (0: Yok, 1: Var)", [0, 1])
                 
-            if st.button("🚀 Üretim Süresini Tahmin Et ve Analiz Çıkar", type="primary"):
+            if st.button("🚀 Toplam Teslimat Süresini Tahmin Et", type="primary"):
                 def dinamik_zorluk_manuel(urun):
                     urun_str = str(urun).upper()
                     if urun_str in ZORLUK_HARITASI: return ZORLUK_HARITASI[urun_str]
@@ -348,9 +360,20 @@ try:
                 
                 ham_veri = np.array([[birlesik_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, input_kisi]])
                 veri_scaled = sc.transform(ham_veri)
-                veri_poly = poly.transform(veri_scaled)
-                tahmini_gun = max(regressor.predict(veri_poly)[0], 1.0)
-                st.success(f"### 🎉 Beklenen Üretim Süresi: **{tahmini_gun:.1f} Gün**")
+                
+                # Çift model tahmini
+                tahmini_net_gun = max(rf_net.predict(veri_scaled)[0], 1.0)
+                tahmini_bekleme_gun = max(rf_bekleme.predict(veri_scaled)[0], 0.0)
+                toplam_tahmin_gun = tahmini_net_gun + tahmini_bekleme_gun
+                
+                st.success(f"### 🎯 Toplam Tahmini Teslimat Süresi: **{toplam_tahmin_gun:.1f} Gün**")
+                
+                # Detay kutucukları
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("🛠️ Tahmini Net İmalat Süresi", f"{tahmini_net_gun:.1f} Gün")
+                with col_b:
+                    st.metric("⏳ Tahmini Bekleme / Tedarik Süresi", f"{tahmini_bekleme_gun:.1f} Gün")
                 
                 yerel_carpanlar = np.array([birlesik_zorluk, norm_kapasite, norm_m2, norm_teknik, celik_carp, (3.0 / input_kisi)])
                 yerel_etkiler = yerel_carpanlar * onem_yuzdeleri
@@ -359,7 +382,7 @@ try:
                 etiketler = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Detaylar", "Çelik Kullanımı", "Ekip Yetersizliği"]
                 
                 st.markdown("---")
-                st.subheader("🎯 Bu Makineyi En Çok Ne Yavaşlatıyor?")
+                st.subheader("🎯 İmalatı En Çok Ne Yavaşlatıyor?")
                 fig, ax = plt.subplots(figsize=(8, 3))
                 sirali_indeksler = np.argsort(yerel_yuzdeler)[::-1]
                 sirali_yuzdeler = yerel_yuzdeler[sirali_indeksler]
@@ -370,21 +393,11 @@ try:
                 for index, value in enumerate(sirali_yuzdeler[::-1]):
                     ax.text(value + 0.5, index, f"%{value:.1f}", va='center')
                 st.pyplot(fig)
-                
-                en_buyuk_etken = sirali_etiketler[0]
-                st.markdown("### 🤖 Yapay Zeka Tavsiyesi:")
-                if en_buyuk_etken == "Teknik Detaylar": st.warning("Bu siparişin süresini en çok **Teknik Detayların (Puanın) yüksekliği** uzatıyor. Üretime tecrübeli ustaların atanması önerilir.")
-                elif en_buyuk_etken == "Ekip Yetersizliği": st.warning(f"Süreyi en çok **Ekip Sayısının ({input_kisi} kişi) az olması** uzatıyor. Operatör eklerseniz üretim ciddi oranda hızlanır.")
-                elif en_buyuk_etken == "Kapasite": st.info("Bu siparişte **Kapasite kaynaklı** süre artışı var. Atölyedeki vinç hatlarının rezerve edilmesi önerilir.")
-                elif en_buyuk_etken == "Ürün Zorluğu (Tel Fonk. Dahil)": 
-                    st.info(f"Süreyi en çok **{input_urun}** şasisinin ve seçtiğiniz **{input_telfonk}** kaplamasının birleşik zorluğu etkiliyor. Kalıp, aparat ve atölye hazırlıklarını erkenden başlatın.")
-                elif en_buyuk_etken == "Çelik Kullanımı": st.info("Çelik kullanımı kaynak sürelerini uzatmaktadır. Kaynak istasyonlarının hazır bulunduğundan emin olun.")
-                else: st.success("Sipariş parametreleri oldukça dengeli görünüyor.")
 
     with tab4:
         st.subheader("🏭 Genel Üretim Karakteristiği")
-        st.markdown("Bu grafik, Google E-Tablo üzerinden çekilen canlı verilere göre oluşturulmuştur.")
-        if regressor is not None:
+        st.markdown("Bu grafik, Google E-Tablo üzerinden çekilen net verilerle oluşturulmuştur.")
+        if rf_net is not None:
             fig_genel, ax_genel = plt.subplots(figsize=(8, 3.5))
             etiketler_genel = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
             sirali_indeksler_g = np.argsort(onem_yuzdeleri)[::-1]
