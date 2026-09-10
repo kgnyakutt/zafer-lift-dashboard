@@ -7,7 +7,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
-from st_gsheets_connection import GSheetsConnection  # <-- DÜZELTİLEN SATIR BURASI
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -58,11 +57,16 @@ secilen_kategori = st.sidebar.radio(
     ["Tümü (Genel Analiz)", "Makaslı Üretimler (Makaslılar, EYP, EEP vb.)", "Asansör ve Diğerleri (Kolonlu, HYM, Rampa vb.)"]
 )
 
-# --- VERİ İŞLEME (GOOGLE SHEETS BAĞLANTISI) ---
+# --- VERİ İŞLEME (GOOGLE SHEETS DOĞRUDAN CSV ÇEKME) ---
 @st.cache_data(ttl=60)
 def veri_isle():
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(ttl=60)
+    # Senin Google Sheets linkin doğrudan entegre edildi:
+    sheet_url = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv"
+    
+    try:
+        df = pd.read_csv(sheet_url)
+    except:
+        df = pd.read_excel("personel_listesi_kapasiteli.xlsx")
     
     def urun_normalize(deger):
         if pd.isna(deger): return deger
@@ -382,7 +386,7 @@ try:
         st.markdown("Bu grafik, Google E-Tablo üzerinden çekilen canlı verilere göre oluşturulmuştur.")
         if regressor is not None:
             fig_genel, ax_genel = plt.subplots(figsize=(8, 3.5))
-            etiketler_genel = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Puan", "Çelik Kullanımı", "Ekip Sayısı"]
+            etiketler_genel = ["Ürün Zorluğu (Tel Fonk. Dahil)", "Kapasite", "Ebat (m²)", "Teknik Puan", "Çelik Durumu", "Ekip Sayısı"]
             sirali_indeksler_g = np.argsort(onem_yuzdeleri)[::-1]
             sirali_yuzdeler_g = onem_yuzdeleri[sirali_indeksler_g]
             sirali_etiketler_g = [etiketler_genel[i] for i in sirali_indeksler_g]
@@ -392,5 +396,4 @@ try:
                 ax_genel.text(value + 0.5, index, f"%{value:.1f}", va='center')
             st.pyplot(fig_genel)
 
-except ValueError as ve: st.warning(f"⚠️ Google Sheets Bağlantı Hatası: Lütfen .streamlit/secrets.toml dosyasına Google Sheet bağlantı linkinizi eklediğinizden emin olun. ({ve})")
 except Exception as e: st.error(f"Bir hata oluştu: {e}")
