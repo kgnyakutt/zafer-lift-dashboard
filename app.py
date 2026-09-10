@@ -56,8 +56,8 @@ secilen_kategori = st.sidebar.radio(
     ["Tümü (Genel Analiz)", "Makaslı Üretimler (Makaslılar, EYP, EEP vb.)", "Asansör ve Diğerleri (Kolonlu, HYM, Rampa vb.)"]
 )
 
-# --- VERİ İŞLEME (NET SÜRE VE ZAMAN ETKENİ ENTEGRE EDİLDİ) ---
-@st.cache_data(ttl=60)
+# --- VERİ İŞLEME (GÜNCELLEMELERİ ANINDA ALMAK İÇİN TTL 5 SANİYE YAPILDI) ---
+@st.cache_data(ttl=5)
 def veri_isle():
     sheet_url = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv"
     
@@ -143,6 +143,7 @@ def veri_isle():
     df["Metrekare (m2)"] = df.get("Metrekare (m2)", pd.Series([1.0]*len(df))).apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df.get("Teknik Puan", 1.0), errors='coerce').fillna(1.0)
     
+    # 1. TARİH VE GÜN HESAPLARI (Tam senin söylediğin gibi)
     df["Sipariş Başlangıç Tarihi"] = pd.to_datetime(df["Sipariş Başlangıç"], dayfirst=True, errors='coerce')
     df["Sipariş Çıkış Tarihi"] = pd.to_datetime(df["Sipariş Çıkış(Boya Hariç)"], dayfirst=True, errors='coerce')
     
@@ -153,23 +154,45 @@ def veri_isle():
     else:
         df["Bekleme Süresi (Gün)"] = 0.0
         
+    # NET SÜRE = Toplam Takvim Günü - Bekleme Süresi (Bekleme varsa süreden düşülür!)
     df["Net Üretim Süresi (Gün)"] = df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]
     df["Net Üretim Süresi (Gün)"] = df["Net Üretim Süresi (Gün)"].apply(lambda x: max(x, 1.0) if not pd.isna(x) else 1.0)
 
-    # --- ZAMAN VERİMLİLİĞİ ÇARPANINI HESAPLAMA VE NORMALIZE ETME ---
-    # Her ürün türünün kendi içindeki ortalama net üretim süresini baz alıyoruz
-    ortalama_net_sureler = df.groupby("Ürün Çeşidi")["Net Üretim Süresi (Gün)"].transform("mean")
+    # 2. ZAMAN VERİMLİLİĞİ VE HIZ HESABI (YENİ VE KUSURSUZ MANTIK)
+    min_kap, max_kap = df["Kapasite"].min(), df["Kapasite"].max()
+    df["Normalize_Kapasite"] = 1.0 if max_kap == min_kap else 1.0 + ((df["Kapasite"] - min_kap) / (max_kap - min_kap)) * (MAKSIMUM_CARPAN_KAPASITE - 1.0)
     
-    # Hız Oranı: Ortalama süre / Gerçek net süre (İşi daha kısa sürede bitiren > 1.0 olur)
-    ham_hiz_orani = ortalama_net_sureler / df["Net Üretim Süresi (Gün)"]
+    makasli_mask_local = df["Ürün Çeşidi"].apply(urun_makasli_mi)
+    min_m2, max_m2 = (df.loc[makasli_mask_local, "Metrekare (m2)"].min(), df.loc[makasli_mask_local, "Metrekare (m2)"].max()) if makasli_mask_local.any() else (1.0, 1.0)
+    def m2_normalize_hesapla(row):
+        if urun_makasli_mi(row["Ürün Çeşidi"]) and max_m2 > min_m2:
+            return 1.0 + ((row["Metrekare (m2)"] - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0)
+        return 1.0 
+    df["Normalize_Metrekare"] = df.apply(m2_normalize_hesapla, axis=1)
+    df["Normalize_Teknik"] = 1.0 + ((df["Teknik Puan"] - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
     
-    # Bu oranı 0.85 ile 1.15 arasında güvenli bir şekilde normalize ediyoruz (Aşırı uçmaları engellemek için)
-    min_hiz = ham_hiz_orani.min()
-    max_hiz = ham_hiz_orani.max()
-    if max_hiz > min_hiz:
-        df["Zaman Verimlilik Çarpanı"] = 0.85 + ((ham_hiz_orani - min_hiz) / (max_hiz - min_hiz)) * (1.15 - 0.85)
+    min_ham_z = df["Ham_Zorluk"].min()
+    max_ham_z = df["Ham_Zorluk"].max()
+    if max_ham_z > min_ham_z:
+        df["Zorluk Katsayısı"] = 1.0 + ((df["Ham_Zorluk"] - min_ham_z) / (max_ham_z - min_ham_z)) * (10.0 - 1.0)
     else:
-        df["Zaman Verimlilik Çarpanı"] = 1.0
+        df["Zorluk Katsayısı"] = 1.0
+
+    # Makinenin Kağıt Üstündeki Zorluk/İş Yükü Büyüklüğü
+    df["Ham_İş_Yükü"] = df['Zorluk Katsayısı'] * df['Normalize_Kapasite'] * df['Çelik Çarpanı'] * df['Normalize_Metrekare'] * df['Normalize_Teknik']
+    
+    # Hız Faktörü: İş Yükünü Kaç Günde (Net) Erittiği
+    # Not: Net süre ne kadar kısaysa, payda o kadar küçülür ve Hız o kadar fırlar!
+    df["Günlük_Hız"] = df["Ham_İş_Yükü"] / df["Net Üretim Süresi (Gün)"]
+    
+    # Fabrikanın ortalama çalışma hızını buluyoruz (Denge için)
+    fabrika_medyan_hiz = df["Günlük_Hız"].median()
+    if pd.isna(fabrika_medyan_hiz) or fabrika_medyan_hiz == 0:
+        fabrika_medyan_hiz = 1.0
+        
+    # Operatörün Hız Çarpanı = Kendi Hızı / Fabrika Ortalaması
+    # Uçmaları önlemek için max %75 bonus (1.75), min %50 ceza (0.50) ile sınırlandırıldı.
+    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / fabrika_medyan_hiz).clip(lower=0.50, upper=1.75)
 
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1)
@@ -231,49 +254,31 @@ def tezgah_siralama_anahtari(x):
 
 # --- ANA UYGULAMA ---
 try:
-    df_raw = veri_isle()
+    df = veri_isle()
     
-    min_ham_z = df_raw["Ham_Zorluk"].min()
-    max_ham_z = df_raw["Ham_Zorluk"].max()
-    if max_ham_z > min_ham_z:
-        df_raw["Zorluk Katsayısı"] = 1.0 + ((df_raw["Ham_Zorluk"] - min_ham_z) / (max_ham_z - min_ham_z)) * (10.0 - 1.0)
-    else:
-        df_raw["Zorluk Katsayısı"] = 1.0
-
     if "Makaslı Üretimler" in secilen_kategori:
-        df = df_raw[df_raw["Ürün Çeşidi"].apply(urun_makasli_mi)].copy()
+        df_kategori = df[df["Ürün Çeşidi"].apply(urun_makasli_mi)].copy()
     elif "Asansör ve Diğerleri" in secilen_kategori:
-        df = df_raw[~df_raw["Ürün Çeşidi"].apply(urun_makasli_mi)].copy()
+        df_kategori = df[~df["Ürün Çeşidi"].apply(urun_makasli_mi)].copy()
     else:
-        df = df_raw.copy()
+        df_kategori = df.copy()
 
-    if not df.empty:
-        min_kap, max_kap = df["Kapasite"].min(), df["Kapasite"].max()
-        df["Normalize_Kapasite"] = 1.0 if max_kap == min_kap else 1.0 + ((df["Kapasite"] - min_kap) / (max_kap - min_kap)) * (MAKSIMUM_CARPAN_KAPASITE - 1.0)
-        makasli_mask_local = df["Ürün Çeşidi"].apply(urun_makasli_mi)
-        min_m2, max_m2 = (df.loc[makasli_mask_local, "Metrekare (m2)"].min(), df.loc[makasli_mask_local, "Metrekare (m2)"].max()) if makasli_mask_local.any() else (1.0, 1.0)
-        def m2_normalize_hesapla(row):
-            if urun_makasli_mi(row["Ürün Çeşidi"]) and max_m2 > min_m2:
-                return 1.0 + ((row["Metrekare (m2)"] - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0)
-            return 1.0 
-        df["Normalize_Metrekare"] = df.apply(m2_normalize_hesapla, axis=1)
-        df["Normalize_Teknik"] = 1.0 + ((df["Teknik Puan"] - 1.0) / 9.0) * (MAKSIMUM_CARPAN_TEKNIK - 1.0)
-    else:
+    if df_kategori.empty:
         st.error("Bu kategoride hiç veri bulunamadı! Lütfen sol menüden başka bir kategori seçin.")
         st.stop()
 
-    rf_net, rf_bekleme, sc, onem_yuzdeleri = yapay_zeka_egit(df)
+    rf_net, rf_bekleme, sc, onem_yuzdeleri = yapay_zeka_egit(df_kategori)
     
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Operatör & Tezgah Filtresi")
     
-    tezgahlar_sirali = sorted(list(df["Tezgah"].dropna().unique()), key=tezgah_siralama_anahtari)
+    tezgahlar_sirali = sorted(list(df_kategori["Tezgah"].dropna().unique()), key=tezgah_siralama_anahtari)
     secilen_tezgah = st.sidebar.selectbox("Tezgah Seçin", ["Tümü"] + tezgahlar_sirali)
     
-    tum_operatorler = sorted(list(set(op.strip() for ops in df["Operatörler"].dropna() for op in ops.split(',') if op.strip())))
+    tum_operatorler = sorted(list(set(op.strip() for ops in df_kategori["Operatörler"].dropna() for op in ops.split(',') if op.strip())))
     secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + tum_operatorler)
     
-    df_filtred = df.copy()
+    df_filtred = df_kategori.copy()
     if secilen_tezgah != "Tümü": df_filtred = df_filtred[df_filtred["Tezgah"] == secilen_tezgah]
     if secilen_operator != "Tümü": df_filtred = df_filtred[df_filtred["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
 
@@ -290,10 +295,14 @@ try:
             
         base_df = pd.DataFrame({"Ürün Çeşidi": beklenen_urunler})
         base_df["Katsayı (Normalize 1-10)"] = base_df["Ürün Çeşidi"].map(ZORLUK_HARITASI)
-        if max_ham_z > min_ham_z:
-            base_df["Katsayı (Normalize 1-10)"] = base_df["Katsayı (Normalize 1-10)"].apply(lambda x: 1.0 + ((x - min_ham_z) / (max_ham_z - min_ham_z)) * (10.0 - 1.0) if not pd.isna(x) else 1.0)
+        
+        min_ham_z_global = df["Ham_Zorluk"].min()
+        max_ham_z_global = df["Ham_Zorluk"].max()
+        if max_ham_z_global > min_ham_z_global:
+            base_df["Katsayı (Normalize 1-10)"] = base_df["Katsayı (Normalize 1-10)"].apply(lambda x: 1.0 + ((x - min_ham_z_global) / (max_ham_z_global - min_ham_z_global)) * (10.0 - 1.0) if not pd.isna(x) else 1.0)
+            
         base_df["Toplam"] = 0
-        base_df["Ortalama"] = 0.0
+        base_df["Ortalama Üretim Adedi"] = 0.0
         base_df["Ortalama Toplam Süre (Gün)"] = 0.0
         base_df["Sipariş Sayısı"] = 0
         
@@ -304,7 +313,7 @@ try:
                 "Toplam Süre (Gün)": "mean", 
                 "Sipariş No": "count" if "Sipariş No" in df_filtred.columns else lambda x: len(x)
             }).reset_index()
-            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı (Normalize 1-10)", "Toplam", "Ortalama", "Ortalama Toplam Süre (Gün)", "Sipariş Sayısı"]
+            grup_ozet.columns = ["Ürün Çeşidi", "Katsayı (Normalize 1-10)", "Toplam", "Ortalama Üretim Adedi", "Ortalama Toplam Süre (Gün)", "Sipariş Sayısı"]
             merged_df = pd.concat([grup_ozet, base_df]).drop_duplicates(subset=["Ürün Çeşidi"], keep='first').reset_index(drop=True)
         else:
             merged_df = base_df
@@ -312,7 +321,7 @@ try:
         merged_df["Toplam"] = merged_df["Toplam"].fillna(0).astype(int)
         merged_df["Sipariş Sayısı"] = merged_df["Sipariş Sayısı"].fillna(0).astype(int)
         merged_df["Katsayı (Normalize 1-10)"] = merged_df["Katsayı (Normalize 1-10)"].fillna(1.0).round(2)
-        merged_df["Ortalama"] = merged_df["Ortalama"].fillna(0.0).round(2)
+        merged_df["Ortalama Üretim Adedi"] = merged_df["Ortalama Üretim Adedi"].fillna(0.0).round(2)
         merged_df["Ortalama Toplam Süre (Gün)"] = merged_df["Ortalama Toplam Süre (Gün)"].fillna(0.0).round(2)
         
         merged_df["Siralama_Anahtari"] = merged_df["Ürün Çeşidi"].apply(aile_bazli_siralama)
@@ -321,8 +330,8 @@ try:
         st.dataframe(merged_df, use_container_width=True)
 
     with tab2:
-        st.subheader("👷 Operatör Performans Puanları (Zaman Verimliliği ve Net Süre Dahil)")
-        st.markdown("💡 *Not: Aynı makineyi bekleme sürelerinden arındırılmış net imalat süresinde daha hızlı çıkaran operatörler performans puanında ödüllendirilir.*")
+        st.subheader("👷 Operatör Performans Puanları (Gecikmelerden Arındırılmış & Hız Çarpanlı)")
+        st.markdown("💡 *Not: Toplam takvim gününden bekleme süreleri çıkarılır. Kalan NET SÜRE ne kadar kısaysa (iş ne kadar hızlı çıkarılırsa), operatör o kadar yüksek Hız Çarpanı (Bonus) alır!*")
         if not df_filtred.empty:
             df_op = df_filtred.copy()
             df_op['Operatörler'] = df_op['Operatörler'].str.split(',')
@@ -330,7 +339,7 @@ try:
             df_op['Operatörler'] = df_op['Operatörler'].str.strip()
             df_op = df_op[df_op['Operatörler'] != '']
             
-            # Puan formülüne Zaman Verimlilik Çarpanı da eklendi (Net sürede hızlı olan kazanır)
+            # Artık çarpanımız global olarak yukarıda hesaplandı (Zaman Verimlilik Çarpanı)
             df_op['Toplam Puan'] = (
                 df_op['Üretim Adedi'] * 
                 df_op['Zorluk Katsayısı'] * 
@@ -352,7 +361,7 @@ try:
             st.warning("Modeli eğitmek için bu kategoride yeterli sipariş geçmişi bulunamadı (En az 5 sipariş gerekli).")
         else:
             col1, col2 = st.columns(2)
-            dinamik_urunler = sorted(df["Ürün Çeşidi"].unique().tolist(), key=aile_bazli_siralama)
+            dinamik_urunler = sorted(df_kategori["Ürün Çeşidi"].unique().tolist(), key=aile_bazli_siralama)
             if not dinamik_urunler: 
                 dinamik_urunler = sorted(list(ZORLUK_HARITASI.keys()), key=aile_bazli_siralama)
             
@@ -385,13 +394,19 @@ try:
                         t_carp = 1.75 if input_telfonk == "Sac" else 1.0
                     
                     ham = base_v * t_carp
+                    min_ham_z = df["Ham_Zorluk"].min()
+                    max_ham_z = df["Ham_Zorluk"].max()
                     if max_ham_z > min_ham_z:
                         return 1.0 + ((ham - min_ham_z) / (max_ham_z - min_ham_z)) * (10.0 - 1.0)
                     return 1.0
                     
                 norm_zorluk = dinamik_zorluk_manuel(input_urun)
+                min_kap = df["Kapasite"].min()
+                max_kap = df["Kapasite"].max()
                 norm_kapasite = 1.0 + ((input_kapasite - min_kap) / (max_kap - min_kap)) * (MAKSIMUM_CARPAN_KAPASITE - 1.0) if max_kap > min_kap else 1.0
                 
+                makasli_mask = df["Ürün Çeşidi"].apply(urun_makasli_mi)
+                min_m2, max_m2 = (df.loc[makasli_mask, "Metrekare (m2)"].min(), df.loc[makasli_mask, "Metrekare (m2)"].max()) if makasli_mask.any() else (1.0, 1.0)
                 m2_deger = (input_m2 / 1_000_000.0) if input_m2 > 100 else input_m2
                 norm_m2 = 1.0 + ((m2_deger - min_m2) / (max_m2 - min_m2)) * (MAKSIMUM_CARPAN_M2 - 1.0) if urun_makasli_mi(input_urun) and max_m2 > min_m2 else 1.0
                 
