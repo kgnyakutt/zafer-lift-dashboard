@@ -1,5 +1,6 @@
-pandas
 streamlit
-matplotlib
-openpyxl
+pandas
+numpy
 scikit-learn
+matplotlib
+streamlit-gsheets
