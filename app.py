@@ -93,7 +93,7 @@ def veri_isle_kaynak():
         return float(match.group()) / 1_000_000.0 if match and float(match.group()) > 100 else (float(match.group()) if match else 1.0)
         
     df.columns = df.columns.str.strip()
-    hedef_sutunlar = ["Sipariş No", "Model", "Çelik Durumu (1/0)", "Kapasite", "Platform Ebat mm", "Platform Ebat (m2)", "Teknik Puan", "Başlangıç", "Bitiş", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk", "Bekleme Süresi (Gün)"]
+    hedef_sutunlar = ["Sipariş No", "Model", "Çelik Durumu (1/0)", "Kapasite", "Platform Ebat mm", "Platform Ebat (m2)", "Teknik Puan", "Başlangıç", "Bitiş", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk", "Bekleme Süresi (Gün)", "Tabla Kapısı", "Kilitleme"]
     df = df[[col for col in hedef_sutunlar if col in df.columns]]
 
     df["Model"] = df["Model"].apply(urun_normalize)
@@ -103,10 +103,17 @@ def veri_isle_kaynak():
     df["Üretim Adedi"] = pd.to_numeric(df["Üretim Adedi"], errors='coerce').fillna(1.0) if "Üretim Adedi" in df.columns else 1.0
     df["Ham_Zorluk"] = df["Model"].apply(dinamik_zorluk)
     df["Çelik Çarpanı"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0) + 1.0
+    
+    val_tabla = pd.to_numeric(df.get("Tabla Kapısı", 0.0), errors='coerce').fillna(0.0)
+    df["Tabla_Carpani"] = np.where(val_tabla > 0, 1.1, 1.0)
+    val_kilit = pd.to_numeric(df.get("Kilitleme", 0.0), errors='coerce').fillna(0.0)
+    df["Kilitleme_Carpani"] = np.where(val_kilit > 0, 1.2, 1.0)
+
     df["Kapasite_G"] = df.get("Kapasite", pd.Series([1.0]*len(df))).apply(kapasite_ayikla).replace(0, 1.0)
     if "Platform Ebat (m2)" not in df.columns and "Platform Ebat mm" in df.columns: df["Platform Ebat (m2)"] = df["Platform Ebat mm"]
     df["Ebat_G"] = df.get("Platform Ebat (m2)", pd.Series([1.0]*len(df))).apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df.get("Teknik Puan", 1.0), errors='coerce').fillna(1.0)
+    
     df["Toplam Süre (Gün)"] = (pd.to_datetime(df["Bitiş"], dayfirst=True, errors='coerce') - pd.to_datetime(df["Başlangıç"], dayfirst=True, errors='coerce')).dt.days
     df["Bekleme Süresi (Gün)"] = pd.to_numeric(df["Bekleme Süresi (Gün)"], errors='coerce').fillna(0.0) if "Bekleme Süresi (Gün)" in df.columns else 0.0
     df["Net Üretim Süresi (Gün)"] = (df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]).apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
@@ -121,7 +128,7 @@ def veri_isle_kaynak():
     min_hz, max_hz = df["Ham_Zorluk"].min(), df["Ham_Zorluk"].max()
     df["Zorluk Katsayısı"] = 1.0 if max_hz == min_hz else 1.0 + ((df["Ham_Zorluk"] - min_hz) / (max_hz - min_hz)) * 9.0
 
-    df["Ham_İş_Yükü"] = df['Zorluk Katsayısı'] * df['Normalize_Kapasite'] * df['Çelik Çarpanı'] * df['Normalize_Ebat'] * df['Normalize_Teknik'] * df['Üretim Adedi']
+    df["Ham_İş_Yükü"] = df['Zorluk Katsayısı'] * df['Normalize_Kapasite'] * df['Çelik Çarpanı'] * df['Normalize_Ebat'] * df['Normalize_Teknik'] * df['Tabla_Carpani'] * df['Kilitleme_Carpani'] * df['Üretim Adedi']
     df["Günlük_Hız"] = df["Ham_İş_Yükü"] / df["Net Üretim Süresi (Gün)"]
     medyan_hiz = df["Günlük_Hız"].median()
     df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
@@ -131,7 +138,7 @@ def veri_isle_kaynak():
     return df
 
 # ==========================================
-# 2. HİDROLİK ATÖLYESİ VERİ İŞLEME (GÜNCELLENEN ÇARPANLARLA)
+# 2. HİDROLİK ATÖLYESİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=5)
 def veri_isle_hidrolik():
@@ -145,7 +152,6 @@ def veri_isle_hidrolik():
     df = df[[col for col in hedef_sutunlar if col in df.columns]]
     df["Tezgah"] = df.get("Tezgah", pd.Series(["Hidrolik"]*len(df))).fillna("Hidrolik")
     df["Departman"] = "Hidrolik"
-
     df["Üretim Adedi"] = pd.to_numeric(df["Üretim Adedi"], errors='coerce').fillna(1.0) if "Üretim Adedi" in df.columns else 1.0
 
     def parse_sayisal(val):
@@ -159,12 +165,8 @@ def veri_isle_hidrolik():
     df["Net Üretim Süresi (Gün)"] = (pd.to_datetime(df.get("Bitiş"), dayfirst=True, errors='coerce') - pd.to_datetime(df.get("Başlangıç"), dayfirst=True, errors='coerce')).dt.days.apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
     df["Bekleme Süresi (Gün)"] = 0.0 
 
-    # HİDROLİK YENİ ÇARPAN KURALLARI:
-    # Motor (kW): Min 1.0, Max 1.5
     min_m, max_m = df["Motor_Val"].min(), df["Motor_Val"].max()
     df["Normalize_Motor"] = 1.0 if max_m == min_m else 1.0 + ((df["Motor_Val"] - min_m) / (max_m - min_m)) * (1.5 - 1.0)
-
-    # Yağ Tankı (lt): Min 1.0, Max 3.0 (3 Kat)
     min_t, max_t = df["Tank_Val"].min(), df["Tank_Val"].max()
     df["Normalize_Tank"] = 1.0 if max_t == min_t else 1.0 + ((df["Tank_Val"] - min_t) / (max_t - min_t)) * (3.0 - 1.0)
 
@@ -177,7 +179,7 @@ def veri_isle_hidrolik():
     return df
 
 # ==========================================
-# 3. MONTAJ EKİBİ VERİ İŞLEME (GÜNCELLENEN KURALLARLA)
+# 3. MONTAJ EKİBİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=86400)
 def mesafe_hesapla_api(hedef_sehir):
@@ -203,20 +205,18 @@ def veri_isle_montaj():
     df_m["Sipariş No"] = df_m["Sipariş No"].astype(str).str.strip()
     df_m["Tezgah"] = df_m.get("Tezgah", pd.Series(["Montaj Ekibi"]*len(df_m))).fillna("Montaj Ekibi")
     df_m["Departman"] = "Montaj"
-    
     df_m["Üretim Adedi"] = pd.to_numeric(df_m["Üretim Adedi"], errors='coerce').fillna(1.0) if "Üretim Adedi" in df_m.columns else 1.0
         
     df_kaynak = veri_isle_kaynak()
     if not df_kaynak.empty:
         df_kaynak["Sipariş No"] = df_kaynak["Sipariş No"].astype(str).str.strip()
-        makine_ozellikleri = df_kaynak[["Sipariş No", "Normalize_Kapasite", "Normalize_Ebat", "Zorluk Katsayısı", "Çelik Çarpanı"]].drop_duplicates("Sipariş No")
+        makine_ozellikleri = df_kaynak[["Sipariş No", "Normalize_Kapasite", "Normalize_Ebat", "Zorluk Katsayısı", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani"]].drop_duplicates("Sipariş No")
         df_m = pd.merge(df_m, makine_ozellikleri, on="Sipariş No", how="left")
     
-    for col in ["Normalize_Kapasite", "Normalize_Ebat", "Zorluk Katsayısı", "Çelik Çarpanı"]:
+    for col in ["Normalize_Kapasite", "Normalize_Ebat", "Zorluk Katsayısı", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani"]:
         if col not in df_m.columns: df_m[col] = 1.0
         df_m[col] = df_m[col].fillna(1.0)
 
-    # Mesafe Hesaplama ve Normalizasyon
     unique_yerler = df_m["Montaj Yeri"].dropna().unique()
     mesafe_sozlugu = {yer: mesafe_hesapla_api(yer) for yer in unique_yerler}
     df_m["Mesafe (km)"] = df_m["Montaj Yeri"].map(mesafe_sozlugu).fillna(10.0)
@@ -224,34 +224,101 @@ def veri_isle_montaj():
     min_km, max_km = df_m["Mesafe (km)"].min(), df_m["Mesafe (km)"].max()
     df_m["Normalize_Mesafe"] = 1.0 if max_km == min_km else 1.0 + ((df_m["Mesafe (km)"] - min_km) / (max_km - min_km)) * 1.5
 
-    # ORTAM VE MONTAJ DURUMU ÇARPANI KURALI:
-    # Dış -> 1.0 | İç + Vinç -> 2.0 | İç + Manuel -> 4.0
     def ortam_montaj_carpani(row):
         ortam = str(row.get("Ortam", "")).strip().lower()
         durum = str(row.get("Montaj durumu", "")).strip().lower()
-        
-        # İç mekan kontrolü (1 veya 'iç' içeren ifadeler)
         if "1" in ortam or "iç" in ortam or "ic" in ortam:
-            if "vinç" in durum or "vinc" in durum:
-                return 2.0
-            elif "manuel" in durum or "el" in durum:
-                return 4.0
-            return 2.0 # Varsayılan iç mekan
-        return 1.0 # Dış mekan
+            if "vinç" in durum or "vinc" in durum: return 2.0
+            elif "manuel" in durum or "el" in durum: return 4.0
+            return 2.0 
+        return 1.0 
 
     df_m["Ortam_Montaj_Çarpanı"] = df_m.apply(ortam_montaj_carpani, axis=1)
-
     df_m["Net Üretim Süresi (Gün)"] = (pd.to_datetime(df_m.get("Bitiş"), dayfirst=True, errors='coerce') - pd.to_datetime(df_m.get("Başlangıç"), dayfirst=True, errors='coerce')).dt.days.apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
     df_m["Bekleme Süresi (Gün)"] = 0.0
 
-    df_m["Ham_İş_Yükü"] = df_m["Zorluk Katsayısı"] * df_m["Normalize_Kapasite"] * df_m["Normalize_Ebat"] * df_m["Normalize_Mesafe"] * df_m["Ortam_Montaj_Çarpanı"] * df_m["Üretim Adedi"]
+    df_m["Ham_İş_Yükü"] = df_m["Zorluk Katsayısı"] * df_m["Normalize_Kapasite"] * df_m["Normalize_Ebat"] * df_m["Tabla_Carpani"] * df_m["Kilitleme_Carpani"] * df_m["Normalize_Mesafe"] * df_m["Ortam_Montaj_Çarpanı"] * df_m["Üretim Adedi"]
     df_m["Günlük_Hız"] = df_m["Ham_İş_Yükü"] / df_m["Net Üretim Süresi (Gün)"]
     medyan_hiz = df_m["Günlük_Hız"].median()
     df_m["Zaman Verimlilik Çarpanı"] = (df_m["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
     df_m['Operatörler'] = df_m['Operatörler'].fillna('').astype(str)
     df_m['Kişi Sayısı'] = df_m['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
-    
     return df_m
+
+# ==========================================
+# 4. ELEKTRİK ATÖLYESİ VERİ İŞLEME (YENİ)
+# ==========================================
+@st.cache_data(ttl=5)
+def veri_isle_elektrik():
+    # LÜTFEN ELEKTRİK SAYFASININ GID NUMARASINI BURAYA GİRİN:
+    sheet_url_elektrik = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv&gid=1648152517"
+    try: df_e = pd.read_csv(sheet_url_elektrik)
+    except: return pd.DataFrame()
+    if df_e.empty: return df_e
+
+    df_e.columns = df_e.columns.str.strip()
+    hedef_sutunlar_e = ["Sipariş No", "Başlangıç", "Bitiş", "Tezgah", "Operatörler", "Üretim Adedi", "Model", "Durak Sayısı", "Kilitleme", "PLC", "PLC Model", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
+    df_e = df_e[[col for col in hedef_sutunlar_e if col in df_e.columns]]
+    df_e["Sipariş No"] = df_e["Sipariş No"].astype(str).str.strip()
+    df_e["Tezgah"] = df_e.get("Tezgah", pd.Series(["Elektrik"]*len(df_e))).fillna("Elektrik")
+    df_e["Departman"] = "Elektrik"
+    df_e["Üretim Adedi"] = pd.to_numeric(df_e.get("Üretim Adedi", 1), errors='coerce').fillna(1.0)
+
+    # Kaynak Atölyesinden Makine Bilgilerini Çekme (LEFT JOIN)
+    df_kaynak = veri_isle_kaynak()
+    if not df_kaynak.empty:
+        df_kaynak["Sipariş No"] = df_kaynak["Sipariş No"].astype(str).str.strip()
+        makine_ozellikleri = df_kaynak[["Sipariş No", "Normalize_Kapasite", "Normalize_Ebat", "Zorluk Katsayısı"]].drop_duplicates("Sipariş No")
+        df_e = pd.merge(df_e, makine_ozellikleri, on="Sipariş No", how="left")
+    
+    for col in ["Normalize_Kapasite", "Normalize_Ebat", "Zorluk Katsayısı"]:
+        if col not in df_e.columns: df_e[col] = 1.0
+        df_e[col] = df_e[col].fillna(1.0)
+
+    # Durak Sayısı Normalizasyonu
+    durak_vals = pd.to_numeric(df_e.get("Durak Sayısı", 1.0), errors='coerce').fillna(1.0)
+    min_d, max_d = durak_vals.min(), durak_vals.max()
+    df_e["Normalize_Durak"] = 1.0 if max_d == min_d else 1.0 + ((durak_vals - min_d) / (max_d - min_d)) * 0.5
+
+    # Var/Yok Parametreleri (Yok: 1.0, Var: 1.2)
+    parametre_listesi = ["Kilitleme", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
+    for p in parametre_listesi:
+        val = pd.to_numeric(df_e.get(p, 0.0), errors='coerce').fillna(0.0)
+        df_e[f"{p}_Carpani"] = np.where(val > 0, 1.2, 1.0)
+
+    # PLC ve PLC Model Çarpanı (Var: 1.2, PLC Model seçildiyse markaya göre 1.1)
+    plc_val = pd.to_numeric(df_e.get("PLC", 0.0), errors='coerce').fillna(0.0)
+    df_e["PLC_Carpani"] = np.where(plc_val > 0, 1.2, 1.0)
+
+    def plc_model_carpani(row):
+        p_val = pd.to_numeric(row.get("PLC", 0.0), errors='coerce')
+        if pd.isna(p_val) or p_val == 0: return 1.0
+        model = str(row.get("PLC Model", "")).strip().lower()
+        # Gemo, Delta, Omron, Schneider, Siemens -> Şimdilik hepsi 1.1
+        if any(m in model for m in ["gemo", "delta", "omron", "schneider", "siemens"]):
+            return 1.1
+        return 1.1 # Varsayılan marka çarpanı
+
+    df_e["PLC_Model_Carpani"] = df_e.apply(plc_model_carpani, axis=1)
+
+    df_e["Net Üretim Süresi (Gün)"] = (pd.to_datetime(df_e.get("Bitiş"), dayfirst=True, errors='coerce') - pd.to_datetime(df_e.get("Başlangıç"), dayfirst=True, errors='coerce')).dt.days.apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
+    df_e["Bekleme Süresi (Gün)"] = 0.0
+
+    # Elektrik Ham İş Yükü Formülü
+    df_e["Ham_İş_Yükü"] = (
+        df_e["Zorluk Katsayısı"] * df_e["Normalize_Kapasite"] * df_e["Normalize_Ebat"] * 
+        df_e["Normalize_Durak"] * df_e["Kilitleme_Carpani"] * df_e["Sıfırlama_Carpani"] * 
+        df_e["Tabla Kapısı_Carpani"] * df_e["Yavaşlama_Carpani"] * df_e["Buton Tipi_Carpani"] * 
+        df_e["İkaz Lambaları_Carpani"] * df_e["PLC_Carpani"] * df_e["PLC_Model_Carpani"] * df_e["Üretim Adedi"]
+    )
+    
+    df_e["Günlük_Hız"] = df_e["Ham_İş_Yükü"] / df_e["Net Üretim Süresi (Gün)"]
+    medyan_hiz = df_e["Günlük_Hız"].median()
+    df_e["Zaman Verimlilik Çarpanı"] = (df_e["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
+    df_e['Operatörler'] = df_e['Operatörler'].fillna('').astype(str)
+    df_e['Kişi Sayısı'] = df_e['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
+    
+    return df_e
 
 # --- YZ MODELİ ---
 @st.cache_resource
@@ -275,11 +342,13 @@ def yapay_zeka_egit(df_model, X_cols):
 df_k = veri_isle_kaynak()
 df_h = veri_isle_hidrolik()
 df_m = veri_isle_montaj()
+df_e = veri_isle_elektrik()
 
 tezgahlar_k = list(df_k["Tezgah"].dropna().unique()) if not df_k.empty else []
 tezgahlar_h = list(df_h["Tezgah"].dropna().unique()) if not df_h.empty else []
 tezgahlar_m = list(df_m["Tezgah"].dropna().unique()) if not df_m.empty else []
-tum_tezgahlar = sorted(tezgahlar_k + tezgahlar_h + tezgahlar_m)
+tezgahlar_e = list(df_e["Tezgah"].dropna().unique()) if not df_e.empty else []
+tum_tezgahlar = sorted(tezgahlar_k + tezgahlar_h + tezgahlar_m + tezgahlar_e)
 
 def get_op_points(df):
     if df.empty: return pd.DataFrame()
@@ -294,13 +363,14 @@ def get_op_points(df):
 op_k = get_op_points(df_k)
 op_h = get_op_points(df_h)
 op_m = get_op_points(df_m)
-df_op_all = pd.concat([op_k, op_h, op_m], ignore_index=True)
+op_e = get_op_points(df_e)
+df_op_all = pd.concat([op_k, op_h, op_m, op_e], ignore_index=True)
 
 tum_operatorler = sorted(list(df_op_all["Operatörler"].unique())) if not df_op_all.empty else []
 
 # --- SOL MENÜ (FİLTRELER) ---
 st.sidebar.header("🔍 Fabrika Filtreleri")
-st.sidebar.info("💡 'Tümü' seçiliyken ürün analizinde sadece Kaynak Atölyesi gösterilir. Özel birimleri (Hidrolik, Montaj) incelemek için listeden onları seçin.")
+st.sidebar.info("💡 'Tümü' seçiliyken ürün analizinde sadece Kaynak Atölyesi gösterilir. Özel birimleri (Hidrolik, Montaj, Elektrik) incelemek için listeden onları seçin.")
 secilen_tezgah = st.sidebar.selectbox("İstasyon / Tezgah Seçin", ["Tümü"] + tum_tezgahlar)
 secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + tum_operatorler)
 
@@ -338,9 +408,17 @@ with tab1:
             gosterim_df = df_m_filt[["Sipariş No", "Model", "Montaj Yeri", "Mesafe (km)", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı", "Ham_İş_Yükü", "Net Üretim Süresi (Gün)"]]
             st.dataframe(gosterim_df.round(2), use_container_width=True)
 
+    elif secilen_tezgah in tezgahlar_e:
+        st.subheader("⚡ Elektrik Atölyesi Özeti")
+        if not df_e.empty:
+            df_e_filt = df_e[df_e["Tezgah"] == secilen_tezgah]
+            if secilen_operator != "Tümü": df_e_filt = df_e_filt[df_e_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            gosterim_e = df_e_filt[["Sipariş No", "Model", "Durak Sayısı", "PLC", "PLC Model", "Ham_İş_Yükü", "Net Üretim Süresi (Gün)"]]
+            st.dataframe(gosterim_e.round(2), use_container_width=True)
+
 with tab2:
     st.subheader("🏆 Fabrika Geneli Operatör Performans Sıralaması")
-    st.markdown("*(Kaynak, Hidrolik ve Montaj personelleri ortak havuzda puanlanmaktadır.)*")
+    st.markdown("*(Kaynak, Hidrolik, Montaj ve Elektrik personelleri ortak havuzda puanlanmaktadır.)*")
     if not df_op_all.empty:
         op_gosterim = df_op_all.copy()
         if secilen_tezgah != "Tümü": op_gosterim = op_gosterim[op_gosterim["Tezgah"] == secilen_tezgah]
@@ -356,10 +434,10 @@ with tab2:
 
 with tab3:
     st.subheader("🔮 Yapay Zeka Süre Tahmini")
-    yz_departman = st.radio("Hangi atölye için tahmin yapmak istiyorsunuz?", ["Kaynak İmalatı", "Hidrolik Ünitesi", "Montaj Seferi"], horizontal=True)
+    yz_departman = st.radio("Hangi atölye için tahmin yapmak istiyorsunuz?", ["Kaynak İmalatı", "Hidrolik Ünitesi", "Montaj Seferi", "Elektrik Atölyesi"], horizontal=True)
     
     if yz_departman == "Kaynak İmalatı" and not df_k.empty:
-        X_k = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Teknik", "Çelik Çarpanı", "Kişi Sayısı"]
+        X_k = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Teknik", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani", "Kişi Sayısı"]
         rf_net, _, sc, _, metrik_k = yapay_zeka_egit(df_k, X_k)
         if rf_net:
             col1, col2 = st.columns(2)
@@ -367,12 +445,16 @@ with tab3:
                 in_k_urun = st.selectbox("Model", sorted(df_k["Model"].unique()))
                 in_k_kapasite = st.number_input("Kapasite (Ton)", value=1.0)
                 in_k_m2 = st.number_input("Platform Ebatı (m2)", value=5.0)
+                in_k_tabla = st.selectbox("Tabla Kapısı", [0, 1])
             with col2:
                 in_k_kisi = st.number_input("Ekip Sayısı", min_value=1, value=1)
                 in_k_teknik = st.slider("Teknik Zorluk", 1.0, 10.0, 1.0)
                 in_k_celik = st.selectbox("Çelik Durumu", [0, 1])
+                in_k_kilit = st.selectbox("Kilitleme", [0, 1])
             if st.button("🚀 Tahmin Et (Kaynak)"):
-                ham_veri = np.array([[2.5, 1.2, 1.1, 1.0 + (in_k_teknik/10), in_k_celik+1.0, in_k_kisi]]) 
+                t_carp = 1.1 if in_k_tabla == 1 else 1.0
+                k_carp = 1.2 if in_k_kilit == 1 else 1.0
+                ham_veri = np.array([[2.5, 1.2, 1.1, 1.0 + (in_k_teknik/10), in_k_celik+1.0, t_carp, k_carp, in_k_kisi]]) 
                 st.success(f"🎯 Tahmini Net Süre: **{max(rf_net.predict(sc.transform(ham_veri))[0], 1.0):.1f} Gün** (±{metrik_k['Net_MAE']:.1f} Gün Yanılma Payı)")
         else: st.warning("Yeterli veri yok.")
 
@@ -394,7 +476,7 @@ with tab3:
         else: st.warning("Yeterli veri yok.")
 
     elif yz_departman == "Montaj Seferi" and not df_m.empty:
-        X_m = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı", "Kişi Sayısı"]
+        X_m = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Tabla_Carpani", "Kilitleme_Carpani", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı", "Kişi Sayısı"]
         rf_net, _, sc, _, metrik_m = yapay_zeka_egit(df_m, X_m)
         if rf_net:
             col1, col2 = st.columns(2)
@@ -407,5 +489,23 @@ with tab3:
             if st.button("🚀 Tahmin Et (Montaj)"):
                 mesafe = mesafe_hesapla_api(in_m_hedef)
                 o_carp = 1.0 if "Dış" in in_m_ortam else (2.0 if "Vinç" in in_m_durum else 4.0)
-                st.success(f"📍 {in_m_hedef} ({mesafe:.1f} km) için Tahmini Süre: **{max(rf_net.predict(sc.transform(np.array([[1.5, 1.2, 1.2, 1.2, o_carp, in_m_kisi]])))[0], 0.5):.1f} Gün**")
+                st.success(f"📍 {in_m_hedef} ({mesafe:.1f} km) için Tahmini Süre: **{max(rf_net.predict(sc.transform(np.array([[1.5, 1.2, 1.2, 1.0, 1.0, 1.2, o_carp, in_m_kisi]])))[0], 0.5):.1f} Gün**")
+        else: st.warning("Yeterli veri yok.")
+
+    elif yz_departman == "Elektrik Atölyesi" and not df_e.empty:
+        X_e = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Durak", "Kilitleme_Carpani", "Sıfırlama_Carpani", "Tabla Kapısı_Carpani", "Yavaşlama_Carpani", "Buton Tipi_Carpani", "İkaz Lambaları_Carpani", "PLC_Carpani", "PLC_Model_Carpani", "Kişi Sayısı"]
+        rf_net, _, sc, _, metrik_e = yapay_zeka_egit(df_e, X_e)
+        if rf_net:
+            col1, col2 = st.columns(2)
+            with col1:
+                in_e_durak = st.number_input("Durak Sayısı", min_value=1, value=3)
+                in_e_plc = st.selectbox("PLC Var mı?", [0, 1])
+                in_e_model = st.selectbox("PLC Model", ["Gemo", "Delta", "Omron", "Schneider", "Siemens"])
+            with col2:
+                in_e_kisi = st.number_input("Elektrik Ekibi Kişi Sayısı", min_value=1, value=2)
+            if st.button("🚀 Tahmin Et (Elektrik)"):
+                p_carp = 1.2 if in_e_plc == 1 else 1.0
+                m_carp = 1.1 if in_e_plc == 1 else 1.0
+                ham_e = np.array([[1.5, 1.2, 1.2, 1.1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, p_carp, m_carp, in_e_kisi]])
+                st.success(f"🎯 Tahmini Elektrik İmalat Süresi: **{max(rf_net.predict(sc.transform(ham_e))[0], 0.5):.1f} Gün**")
         else: st.warning("Yeterli veri yok.")
