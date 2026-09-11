@@ -40,13 +40,13 @@ ZORLUK_HARITASI = {
     "EYP1Ç": 1.0, "HYM2": 1.0, "HYM1": 1.0, "HYM2EAP": 1.0, "HR": 1.0,
     "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
     "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
-    "EEP3": 1.0, "EYP1H": 1.0,"EAP3":1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
+    "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
     "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0
 }
 MAKSIMUM_CARPAN_KAPASITE = 2.0   
 MAKSIMUM_CARPAN_M2 = 1.3       
 MAKSIMUM_CARPAN_TEKNIK = 1.5   
-MAKASLI_KODLAR = ["EYP1Ç", "EYP2", "EYP3", "EYP1", "EAP2", "EYP1U", "EYP4", "EYP1S12", "EYP1S11", "EAP1","EAP3", "EYP1T", "EEP3", "EYP1H", "EYP1A", "EEP2", "EEP1", "PYM157ÖZEL", "EYP2H", "HR"]
+MAKASLI_KODLAR = ["EYP1Ç", "EYP2", "EYP3", "EYP1", "EAP2", "EYP1U", "EYP4", "EYP1S12", "EYP1S11", "EAP1", "EYP1T", "EEP3", "EYP1H", "EYP1A", "EEP2", "EEP1", "PYM157ÖZEL", "EYP2H", "HR"]
 
 def urun_makasli_mi(urun):
     urun_str = str(urun).upper().replace("İ", "I").replace("ı", "I")
@@ -137,7 +137,9 @@ def veri_isle_kaynak():
     df["Ham_İş_Yükü"] = df['Zorluk Katsayısı'] * df['Normalize_Kapasite'] * df['Çelik Çarpanı'] * df['Normalize_Ebat'] * df['Normalize_Teknik'] * df['Tabla_Carpani'] * df['Kilitleme_Carpani'] * df['Üretim Adedi']
     df["Günlük_Hız"] = df["Ham_İş_Yükü"] / df["Net Üretim Süresi (Gün)"]
     medyan_hiz = df["Günlük_Hız"].median()
-    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
+    
+    # %20 Hız Verimlilik Sınırı
+    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
     
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
@@ -192,7 +194,10 @@ def veri_isle_hidrolik():
     df["Ham_İş_Yükü"] = df["Zorluk Katsayısı"] * df["Normalize_Kapasite"] * df["Normalize_Ebat"] * df["Normalize_Tank"] * df["Normalize_Motor"] * df["Üretim Adedi"]
     df["Saatlik_Hız"] = df["Ham_İş_Yükü"] / df["Net Süre"]
     medyan_hiz = df["Saatlik_Hız"].median()
-    df["Zaman Verimlilik Çarpanı"] = (df["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
+    
+    # %20 Hız Verimlilik Sınırı
+    df["Zaman Verimlilik Çarpanı"] = (df["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
+    
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
     return df
@@ -262,7 +267,10 @@ def veri_isle_montaj():
     df_m["Ham_İş_Yükü"] = df_m["Zorluk Katsayısı"] * df_m["Normalize_Kapasite"] * df_m["Normalize_Ebat"] * df_m["Tabla_Carpani"] * df_m["Kilitleme_Carpani"] * df_m["Normalize_Mesafe"] * df_m["Ortam_Montaj_Çarpanı"] * df_m["Üretim Adedi"]
     df_m["Günlük_Hız"] = df_m["Ham_İş_Yükü"] / df_m["Net Üretim Süresi (Gün)"]
     medyan_hiz = df_m["Günlük_Hız"].median()
-    df_m["Zaman Verimlilik Çarpanı"] = (df_m["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
+    
+    # %20 Hız Verimlilik Sınırı
+    df_m["Zaman Verimlilik Çarpanı"] = (df_m["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
+    
     df_m['Operatörler'] = df_m['Operatörler'].fillna('').astype(str)
     df_m['Kişi Sayısı'] = df_m['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
     return df_m
@@ -331,7 +339,10 @@ def veri_isle_elektrik():
     
     df_e["Saatlik_Hız"] = df_e["Ham_İş_Yükü"] / df_e["Net Süre"]
     medyan_hiz = df_e["Saatlik_Hız"].median()
-    df_e["Zaman Verimlilik Çarpanı"] = (df_e["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
+    
+    # %20 Hız Verimlilik Sınırı
+    df_e["Zaman Verimlilik Çarpanı"] = (df_e["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
+    
     df_e['Operatörler'] = df_e['Operatörler'].fillna('').astype(str)
     df_e['Kişi Sayısı'] = df_e['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
     return df_e
@@ -367,6 +378,7 @@ tezgahlar_m = list(df_m["Tezgah"].dropna().unique()) if not df_m.empty else []
 tezgahlar_e = list(df_e["Tezgah"].dropna().unique()) if not df_e.empty else []
 tum_tezgahlar = sorted(tezgahlar_k + tezgahlar_h + tezgahlar_m + tezgahlar_e)
 
+# --- 100 ÜZERİNDEN ORTAK PUANLAMA SİSTEMİ (NORMALİZASYON) ---
 def get_op_points(df):
     if df.empty: return pd.DataFrame()
     d = df.copy()
@@ -374,7 +386,18 @@ def get_op_points(df):
     d = d.explode('Operatörler')
     d['Operatörler'] = d['Operatörler'].str.strip()
     d = d[d['Operatörler'] != '']
-    d['Kişi Başı Puan'] = (d['Ham_İş_Yükü'] * d['Zaman Verimlilik Çarpanı']) / d['Kişi Sayısı']
+    
+    # Ustanın iş bazında ham kazancı
+    d['Ham_Puan'] = (d['Ham_İş_Yükü'] * d['Zaman Verimlilik Çarpanı']) / d['Kişi Sayısı']
+    
+    # Departman içi "100 Puan" standardını bulma (Ortalama bir usta 100 alır)
+    op_toplam_puanlari = d.groupby('Operatörler')['Ham_Puan'].sum()
+    if op_toplam_puanlari.empty: return pd.DataFrame()
+    
+    dept_ortalama = op_toplam_puanlari.mean()
+    carpan = 100.0 / dept_ortalama if dept_ortalama > 0 else 1.0
+    
+    d['Kişi Başı Puan'] = d['Ham_Puan'] * carpan
     return d[['Operatörler', 'Kişi Başı Puan', 'Tezgah', 'Departman', 'Sipariş No']]
 
 op_k = get_op_points(df_k)
@@ -429,7 +452,7 @@ with tab1:
 
 with tab2:
     st.subheader("🏆 Fabrika Geneli Operatör Performans Sıralaması")
-    st.markdown("*(Tüm atölye personelleri ortak havuzda performans standartlarına göre puanlanmaktadır.)*")
+    st.markdown("*(Tüm atölye personelleri ortak **100 Puan Standardı** havuzunda kendi departman zorluklarına göre adilce sıralanmaktadır.)*")
     if not df_op_all.empty:
         op_gosterim = df_op_all.copy()
         if secilen_tezgah != "Tümü": op_gosterim = op_gosterim[op_gosterim["Tezgah"] == secilen_tezgah]
@@ -438,7 +461,7 @@ with tab2:
         final_op_tablosu = op_gosterim.groupby("Operatörler").agg(
             {"Kişi Başı Puan": "sum", "Sipariş No": "count", "Departman": lambda x: ", ".join(x.unique())}
         ).reset_index().round(1).sort_values("Kişi Başı Puan", ascending=False)
-        final_op_tablosu.rename(columns={"Sipariş No": "Tamamlanan İş"}, inplace=True)
+        final_op_tablosu.rename(columns={"Sipariş No": "Tamamlanan İş", "Kişi Başı Puan": "Performans Skoru (100 Üzerinden)"}, inplace=True)
         st.dataframe(final_op_tablosu, use_container_width=True)
     else:
         st.info("Gösterilecek operatör verisi bulunamadı.")
