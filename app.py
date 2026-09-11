@@ -107,9 +107,9 @@ def veri_isle_kaynak():
     df["Teknik Puan"] = pd.to_numeric(df.get("Teknik Puan", 1.0), errors='coerce').fillna(1.0)
     df["Toplam Süre (Gün)"] = (pd.to_datetime(df["Bitiş"], dayfirst=True, errors='coerce') - pd.to_datetime(df["Başlangıç"], dayfirst=True, errors='coerce')).dt.days
     if "Bekleme Süresi (Gün)" in df.columns:
-    df["Bekleme Süresi (Gün)"] = pd.to_numeric(df["Bekleme Süresi (Gün)"], errors='coerce').fillna(0.0)
+        df["Bekleme Süresi (Gün)"] = pd.to_numeric(df["Bekleme Süresi (Gün)"], errors='coerce').fillna(0.0)
     else:
-    df["Bekleme Süresi (Gün)"] = 0.0
+        df["Bekleme Süresi (Gün)"] = 0.0
     df["Net Üretim Süresi (Gün)"] = (df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]).apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
 
     min_kap, max_kap = df["Kapasite_G"].min(), df["Kapasite_G"].max()
