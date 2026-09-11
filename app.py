@@ -254,7 +254,7 @@ def veri_isle_montaj():
 # ==========================================
 @st.cache_data(ttl=5)
 def veri_isle_elektrik():
-    sheet_url_elektrik = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv&gid=BURAYA_ELEKTRIK_GID_YAZ"
+    sheet_url_elektrik = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv&gid=1648152517"
     try: df_e = pd.read_csv(sheet_url_elektrik)
     except: return pd.DataFrame()
     if df_e.empty: return df_e
