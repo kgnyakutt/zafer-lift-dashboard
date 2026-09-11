@@ -13,7 +13,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması
-st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layout="wide")
+st.set_page_config(page_title="Zafer Lift - Üretim dan Performans Panosu", layout="wide")
 
 # --- GÜVENLİK KİLİDİ ---
 def sifre_kontrol():
@@ -102,11 +102,15 @@ def veri_isle_kaynak():
     
     df["Üretim Adedi"] = pd.to_numeric(df["Üretim Adedi"], errors='coerce').fillna(1.0) if "Üretim Adedi" in df.columns else 1.0
     df["Ham_Zorluk"] = df["Model"].apply(dinamik_zorluk)
-    df["Çelik Çarpanı"] = pd.to_numeric(df.get("Çelik Durumu (1/0)", 0.0), errors='coerce').fillna(0.0) + 1.0
     
-    val_tabla = pd.to_numeric(df.get("Tabla Kapısı", 0.0), errors='coerce').fillna(0.0)
+    celik_val = pd.to_numeric(df["Çelik Durumu (1/0)"], errors='coerce').fillna(0.0) if "Çelik Durumu (1/0)" in df.columns else 0.0
+    df["Çelik Çarpanı"] = celik_val + 1.0
+    
+    # Güvenli Tabla Kapısı ve Kilitleme Kontrolü
+    val_tabla = pd.to_numeric(df["Tabla Kapısı"], errors='coerce').fillna(0.0) if "Tabla Kapısı" in df.columns else pd.Series(0.0, index=df.index)
     df["Tabla_Carpani"] = np.where(val_tabla > 0, 1.1, 1.0)
-    val_kilit = pd.to_numeric(df.get("Kilitleme", 0.0), errors='coerce').fillna(0.0)
+
+    val_kilit = pd.to_numeric(df["Kilitleme"], errors='coerce').fillna(0.0) if "Kilitleme" in df.columns else pd.Series(0.0, index=df.index)
     df["Kilitleme_Carpani"] = np.where(val_kilit > 0, 1.2, 1.0)
 
     df["Kapasite_G"] = df.get("Kapasite", pd.Series([1.0]*len(df))).apply(kapasite_ayikla).replace(0, 1.0)
@@ -246,12 +250,11 @@ def veri_isle_montaj():
     return df_m
 
 # ==========================================
-# 4. ELEKTRİK ATÖLYESİ VERİ İŞLEME (YENİ)
+# 4. ELEKTRİK ATÖLYESİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=5)
 def veri_isle_elektrik():
-    # LÜTFEN ELEKTRİK SAYFASININ GID NUMARASINI BURAYA GİRİN:
-    sheet_url_elektrik = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv&gid=1648152517"
+    sheet_url_elektrik = "https://docs.google.com/spreadsheets/d/1CO4--GtXz5qu5Qm0L3jz91x6xfFzmQ-0aZiplKZMLWI/export?format=csv&gid=BURAYA_ELEKTRIK_GID_YAZ"
     try: df_e = pd.read_csv(sheet_url_elektrik)
     except: return pd.DataFrame()
     if df_e.empty: return df_e
@@ -264,7 +267,6 @@ def veri_isle_elektrik():
     df_e["Departman"] = "Elektrik"
     df_e["Üretim Adedi"] = pd.to_numeric(df_e.get("Üretim Adedi", 1), errors='coerce').fillna(1.0)
 
-    # Kaynak Atölyesinden Makine Bilgilerini Çekme (LEFT JOIN)
     df_kaynak = veri_isle_kaynak()
     if not df_kaynak.empty:
         df_kaynak["Sipariş No"] = df_kaynak["Sipariş No"].astype(str).str.strip()
@@ -275,18 +277,15 @@ def veri_isle_elektrik():
         if col not in df_e.columns: df_e[col] = 1.0
         df_e[col] = df_e[col].fillna(1.0)
 
-    # Durak Sayısı Normalizasyonu
     durak_vals = pd.to_numeric(df_e.get("Durak Sayısı", 1.0), errors='coerce').fillna(1.0)
     min_d, max_d = durak_vals.min(), durak_vals.max()
     df_e["Normalize_Durak"] = 1.0 if max_d == min_d else 1.0 + ((durak_vals - min_d) / (max_d - min_d)) * 0.5
 
-    # Var/Yok Parametreleri (Yok: 1.0, Var: 1.2)
     parametre_listesi = ["Kilitleme", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
     for p in parametre_listesi:
         val = pd.to_numeric(df_e.get(p, 0.0), errors='coerce').fillna(0.0)
         df_e[f"{p}_Carpani"] = np.where(val > 0, 1.2, 1.0)
 
-    # PLC ve PLC Model Çarpanı (Var: 1.2, PLC Model seçildiyse markaya göre 1.1)
     plc_val = pd.to_numeric(df_e.get("PLC", 0.0), errors='coerce').fillna(0.0)
     df_e["PLC_Carpani"] = np.where(plc_val > 0, 1.2, 1.0)
 
@@ -294,17 +293,15 @@ def veri_isle_elektrik():
         p_val = pd.to_numeric(row.get("PLC", 0.0), errors='coerce')
         if pd.isna(p_val) or p_val == 0: return 1.0
         model = str(row.get("PLC Model", "")).strip().lower()
-        # Gemo, Delta, Omron, Schneider, Siemens -> Şimdilik hepsi 1.1
         if any(m in model for m in ["gemo", "delta", "omron", "schneider", "siemens"]):
             return 1.1
-        return 1.1 # Varsayılan marka çarpanı
+        return 1.1
 
     df_e["PLC_Model_Carpani"] = df_e.apply(plc_model_carpani, axis=1)
 
     df_e["Net Üretim Süresi (Gün)"] = (pd.to_datetime(df_e.get("Bitiş"), dayfirst=True, errors='coerce') - pd.to_datetime(df_e.get("Başlangıç"), dayfirst=True, errors='coerce')).dt.days.apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
     df_e["Bekleme Süresi (Gün)"] = 0.0
 
-    # Elektrik Ham İş Yükü Formülü
     df_e["Ham_İş_Yükü"] = (
         df_e["Zorluk Katsayısı"] * df_e["Normalize_Kapasite"] * df_e["Normalize_Ebat"] * 
         df_e["Normalize_Durak"] * df_e["Kilitleme_Carpani"] * df_e["Sıfırlama_Carpani"] * 
@@ -317,7 +314,6 @@ def veri_isle_elektrik():
     df_e["Zaman Verimlilik Çarpanı"] = (df_e["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.85, upper=1.15)
     df_e['Operatörler'] = df_e['Operatörler'].fillna('').astype(str)
     df_e['Kişi Sayısı'] = df_e['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
-    
     return df_e
 
 # --- YZ MODELİ ---
@@ -370,7 +366,7 @@ tum_operatorler = sorted(list(df_op_all["Operatörler"].unique())) if not df_op_
 
 # --- SOL MENÜ (FİLTRELER) ---
 st.sidebar.header("🔍 Fabrika Filtreleri")
-st.sidebar.info("💡 'Tümü' seçiliyken ürün analizinde sadece Kaynak Atölyesi gösterilir. Özel birimleri (Hidrolik, Montaj, Elektrik) incelemek için listeden onları seçin.")
+st.sidebar.info("💡 'Tümü' seçiliyken ürün analizinde sadece Kaynak Atölyesi gösterilir. Özel birimleri incelemek için listeden seçin.")
 secilen_tezgah = st.sidebar.selectbox("İstasyon / Tezgah Seçin", ["Tümü"] + tum_tezgahlar)
 secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + tum_operatorler)
 
@@ -418,7 +414,7 @@ with tab1:
 
 with tab2:
     st.subheader("🏆 Fabrika Geneli Operatör Performans Sıralaması")
-    st.markdown("*(Kaynak, Hidrolik, Montaj ve Elektrik personelleri ortak havuzda puanlanmaktadır.)*")
+    st.markdown("*(Tüm atölye personelleri ortak havuzda puanlanmaktadır.)*")
     if not df_op_all.empty:
         op_gosterim = df_op_all.copy()
         if secilen_tezgah != "Tümü": op_gosterim = op_gosterim[op_gosterim["Tezgah"] == secilen_tezgah]
