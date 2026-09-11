@@ -54,7 +54,7 @@ def urun_makasli_mi(urun):
     return any(kod in urun_str for kod in MAKASLI_KODLAR)
 
 # ==========================================
-# 1. KAYNAK ATÖLYESİ VERİ İŞLEME (SÜRE / SAAT BAZLI)
+# 1. KAYNAK ATÖLYESİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=5)
 def veri_isle_kaynak():
@@ -93,9 +93,9 @@ def veri_isle_kaynak():
         return float(match.group()) / 1_000_000.0 if match and float(match.group()) > 100 else (float(match.group()) if match else 1.0)
         
     df.columns = df.columns.str.strip()
-    hedef_sutunlar = ["Sipariş No", "Model", "Çelik Durumu (1/0)", "Kapasite", "Platform Ebat mm", "Platform Ebat (m2)", "Teknik Puan", "Süre", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk", "Tabla Kapısı", "Kilitleme"]
+    hedef_sutunlar = ["Sipariş No", "Model", "Çelik Durumu (1/0)", "Kapasite", "Platform Ebat mm", "Platform Ebat (m2)", "Teknik Puan", "Süre(Saat)", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk", "Tabla Kapısı", "Kilitleme"]
     for col in hedef_sutunlar:
-        if col not in df.columns: df[col] = 0.0 if "Durumu" in col or col in ["Tabla Kapısı", "Kilitleme", "Üretim Adedi", "Süre"] else ""
+        if col not in df.columns: df[col] = 0.0 if "Durumu" in col or col in ["Tabla Kapısı", "Kilitleme", "Üretim Adedi", "Süre(Saat)"] else ""
     df = df[hedef_sutunlar]
 
     df["Sipariş No"] = df["Sipariş No"].fillna("BELİRSİZ").astype(str)
@@ -120,8 +120,7 @@ def veri_isle_kaynak():
     df["Ebat_G"] = df["Platform Ebat (m2)"].apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df["Teknik Puan"], errors='coerce').fillna(1.0)
     
-    # Doğrudan girilen Süre (Saat)
-    df["Net Süre"] = pd.to_numeric(df["Süre"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
+    df["Net Süre"] = pd.to_numeric(df["Süre(Saat)"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
 
     min_kap, max_kap = df["Kapasite_G"].min(), df["Kapasite_G"].max()
     df["Normalize_Kapasite"] = 1.0 if max_kap == min_kap else 1.0 + ((df["Kapasite_G"] - min_kap) / (max_kap - min_kap)) * (MAKSIMUM_CARPAN_KAPASITE - 1.0)
@@ -143,7 +142,7 @@ def veri_isle_kaynak():
     return df
 
 # ==========================================
-# 2. HİDROLİK ATÖLYESİ VERİ İŞLEME (SİPARİŞ NO + SÜRE)
+# 2. HİDROLİK ATÖLYESİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=5)
 def veri_isle_hidrolik():
@@ -153,9 +152,9 @@ def veri_isle_hidrolik():
     if df.empty: return df
 
     df.columns = df.columns.str.strip()
-    hedef_sutunlar = ["Sipariş No", "Süre", "Tezgah", "Operatörler", "Üretim Adedi", "Yağ Tankı(lt)", "Motor(kW)"]
+    hedef_sutunlar = ["Sipariş No", "Süre(Saat)", "Tezgah", "Operatörler", "Üretim Adedi", "Yağ Tankı(lt)", "Motor(kW)"]
     for col in hedef_sutunlar:
-        if col not in df.columns: df[col] = 1.0 if col in ["Üretim Adedi", "Süre"] else ""
+        if col not in df.columns: df[col] = 1.0 if col in ["Üretim Adedi", "Süre(Saat)"] else ""
     df = df[hedef_sutunlar]
 
     df["Sipariş No"] = df["Sipariş No"].fillna("BELİRSİZ").astype(str).str.strip()
@@ -181,7 +180,7 @@ def veri_isle_hidrolik():
 
     df["Tank_Val"] = df["Yağ Tankı(lt)"].apply(parse_sayisal)
     df["Motor_Val"] = df["Motor(kW)"].apply(parse_sayisal)
-    df["Net Süre"] = pd.to_numeric(df["Süre"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
+    df["Net Süre"] = pd.to_numeric(df["Süre(Saat)"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
 
     min_m, max_m = df["Motor_Val"].min(), df["Motor_Val"].max()
     df["Normalize_Motor"] = 1.0 if max_m == min_m else 1.0 + ((df["Motor_Val"] - min_m) / (max_m - min_m)) * (1.5 - 1.0)
@@ -197,7 +196,7 @@ def veri_isle_hidrolik():
     return df
 
 # ==========================================
-# 3. MONTAJ EKİBİ VERİ İŞLEME (SİPARİŞ NO + SÜRE)
+# 3. MONTAJ EKİBİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=86400)
 def mesafe_hesapla_api(hedef_sehir):
@@ -218,9 +217,9 @@ def veri_isle_montaj():
     if df_m.empty: return df_m
 
     df_m.columns = df_m.columns.str.strip()
-    hedef_sutunlar_m = ["Sipariş No", "Süre", "Tezgah", "Operatörler", "Üretim Adedi", "Montaj Yeri", "Model", "Ortam", "Montaj durumu"]
+    hedef_sutunlar_m = ["Sipariş No", "Süre(Saat)", "Tezgah", "Operatörler", "Üretim Adedi", "Montaj Yeri", "Model", "Ortam", "Montaj durumu"]
     for col in hedef_sutunlar_m:
-        if col not in df_m.columns: df_m[col] = 1.0 if col in ["Üretim Adedi", "Süre"] else ""
+        if col not in df_m.columns: df_m[col] = 1.0 if col in ["Üretim Adedi", "Süre(Saat)"] else ""
     df_m = df_m[hedef_sutunlar_m]
 
     df_m["Sipariş No"] = df_m["Sipariş No"].fillna("BELİRSİZ").astype(str).str.strip()
@@ -255,7 +254,7 @@ def veri_isle_montaj():
         return 1.0 
 
     df_m["Ortam_Montaj_Çarpanı"] = df_m.apply(ortam_montaj_carpani, axis=1)
-    df_m["Net Süre"] = pd.to_numeric(df_m["Süre"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
+    df_m["Net Süre"] = pd.to_numeric(df_m["Süre(Saat)"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
 
     df_m["Ham_İş_Yükü"] = df_m["Zorluk Katsayısı"] * df_m["Normalize_Kapasite"] * df_m["Normalize_Ebat"] * df_m["Tabla_Carpani"] * df_m["Kilitleme_Carpani"] * df_m["Normalize_Mesafe"] * df_m["Ortam_Montaj_Çarpanı"] * df_m["Üretim Adedi"]
     df_m["Saatlik_Hız"] = df_m["Ham_İş_Yükü"] / df_m["Net Süre"]
@@ -266,7 +265,7 @@ def veri_isle_montaj():
     return df_m
 
 # ==========================================
-# 4. ELEKTRİK ATÖLYESİ VERİ İŞLEME (SİPARİŞ NO + SÜRE)
+# 4. ELEKTRİK ATÖLYESİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=5)
 def veri_isle_elektrik():
@@ -276,9 +275,9 @@ def veri_isle_elektrik():
     if df_e.empty: return df_e
 
     df_e.columns = df_e.columns.str.strip()
-    hedef_sutunlar_e = ["Sipariş No", "Süre", "Tezgah", "Operatörler", "Üretim Adedi", "Model", "Durak Sayısı", "Kilitleme", "PLC", "PLC Model", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
+    hedef_sutunlar_e = ["Sipariş No", "Süre(Saat)", "Tezgah", "Operatörler", "Üretim Adedi", "Model", "Durak Sayısı", "Kilitleme", "PLC", "PLC Model", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
     for col in hedef_sutunlar_e:
-        if col not in df_e.columns: df_e[col] = 1.0 if col in ["Üretim Adedi", "Durak Sayısı", "Süre"] else (0.0 if col in ["Kilitleme", "PLC", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"] else "")
+        if col not in df_e.columns: df_e[col] = 1.0 if col in ["Üretim Adedi", "Durak Sayısı", "Süre(Saat)"] else (0.0 if col in ["Kilitleme", "PLC", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"] else "")
     df_e = df_e[hedef_sutunlar_e]
 
     df_e["Sipariş No"] = df_e["Sipariş No"].fillna("BELİRSİZ").astype(str).str.strip()
@@ -318,7 +317,7 @@ def veri_isle_elektrik():
 
     df_e["PLC_Model_Carpani"] = df_e.apply(plc_model_carpani, axis=1)
 
-    df_e["Net Süre"] = pd.to_numeric(df_e["Süre"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
+    df_e["Net Süre"] = pd.to_numeric(df_e["Süre(Saat)"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
 
     df_e["Ham_İş_Yükü"] = (
         df_e["Zorluk Katsayısı"] * df_e["Normalize_Kapasite"] * df_e["Normalize_Ebat"] * 
@@ -384,6 +383,7 @@ tum_operatorler = sorted(list(df_op_all["Operatörler"].unique())) if not df_op_
 
 # --- SOL MENÜ (FİLTRELER) ---
 st.sidebar.header("🔍 Fabrika Filtreleri")
+st.sidebar.info("💡 'Tümü' seçiliyken ürün analizinde sadece Kaynak Atölyesi gösterilir. Özel birimleri incelemek için listeden seçin.")
 secilen_tezgah = st.sidebar.selectbox("İstasyon / Tezgah Seçin", ["Tümü"] + tum_tezgahlar)
 secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + tum_operatorler)
 
