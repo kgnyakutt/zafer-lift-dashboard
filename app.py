@@ -589,7 +589,7 @@ with tab1:
             
             toplam_is = df_e_filt["Sipariş No"].nunique()
             ort_sure = df_e_filt["Net Süre"].mean()
-            plc_oran = (df_e_filt["PLC"].astype(float) > 0).mean() * 100 if "PLC" in df_e_filt.columns else 0
+            plc_oran = (pd.to_numeric(df_e_filt["PLC"], errors='coerce').fillna(0) > 0).mean() * 100 if "PLC" in df_e_filt.columns else 0
             
             m_col1, m_col2, m_col3 = st.columns(3)
             with m_col1: 
