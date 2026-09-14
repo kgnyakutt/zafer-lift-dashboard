@@ -13,7 +13,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması
-st.set_page_config(page_title="Zafer Lift - Üretim ve Performans Panosu", layout="wide")
+st.set_page_config(
+    page_title="Zafer Lift - Üretim ve Performans Panosu", 
+    page_icon="light-logo-zafer-lift.webp", 
+    layout="wide"
+)
 
 # --- GÜVENLİK KİLİDİ ---
 def sifre_kontrol():
@@ -32,7 +36,15 @@ def sifre_kontrol():
 
 if not sifre_kontrol(): st.stop()
 
-st.title("🚀 Zafer Lift Makine - Genel Üretim ve Operatör Performans Panosu")
+col_logo, col_baslik = st.columns([1, 10]) # Genişlik oranlarını ayarlıyoruz
+
+with col_logo:
+    # width değerini büyüterek/küçülterek logonun boyutunu ayarlayabilirsin
+    st.image("light-logo-zafer-lift.webp", width=60) 
+
+with col_baslik:
+    st.title("Zafer Lift Makine - Genel Üretim ve Operatör Performans Panosu")
+
 st.markdown("Tüm atölye ve montaj verileri Google Sheets üzerinden canlı olarak senkronize edilmektedir.")
 
 # --- ZORLUK HARİTASI VE ÇARPANLAR ---
@@ -407,6 +419,9 @@ df_op_all = pd.concat([op_k, op_h, op_m, op_e], ignore_index=True)
 tum_operatorler = sorted(list(df_op_all["Operatörler"].unique())) if not df_op_all.empty else []
 
 # --- SOL MENÜ (FİLTRELER) ---
+# --- SOL MENÜ (FİLTRELER) ---
+st.sidebar.image("light-logo-zafer-lift.webp", use_container_width=True) 
+
 st.sidebar.markdown("## 🏭 Zafer Lift")
 st.sidebar.caption("Üretim Takip ve Veri Analitiği")
 st.sidebar.header("🔍 Fabrika Filtreleri")
