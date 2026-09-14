@@ -41,13 +41,14 @@ ZORLUK_HARITASI = {
     "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
     "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
     "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
-    "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0, 
-    "EAP3": 1.0 
+    "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
+    "EAP3": 1.0 # EAP3 eklendi
 }
 MAKSIMUM_CARPAN_KAPASITE = 2.0   
 MAKSIMUM_CARPAN_M2 = 1.3       
 MAKSIMUM_CARPAN_TEKNIK = 1.5   
-MAKASLI_KODLAR = ["EYP1Ç", "EYP2", "EYP3", "EYP1", "EAP2", "EYP1U", "EYP4", "EYP1S12", "EYP1S11", "EAP1", "EYP1T", "EEP3", "EYP1H", "EYP1A", "EEP2", "EEP1", "PYM157ÖZEL", "EYP2H", "HR", "EAP3"] # EAP3 makaslı listesine eklendi
+# EAP3 makaslı listesine eklendi
+MAKASLI_KODLAR = ["EYP1Ç", "EYP2", "EYP3", "EYP1", "EAP2", "EYP1U", "EYP4", "EYP1S12", "EYP1S11", "EAP1", "EYP1T", "EEP3", "EYP1H", "EYP1A", "EEP2", "EEP1", "PYM157ÖZEL", "EYP2H", "HR", "EAP3"]
 
 def urun_makasli_mi(urun):
     urun_str = str(urun).upper().replace("İ", "I").replace("ı", "I")
@@ -123,7 +124,6 @@ def veri_isle_kaynak():
         u_val = pd.to_numeric(row.get("Uzunluk", 1.0), errors='coerce')
         if pd.isna(u_val) or u_val < 1.0: u_val = 1.0
         if u_val > 22.0: u_val = 22.0
-        # Formül: 1 + ((Değer - Min) / (Maks - Min)) * (MaksÇarpan - MinÇarpan)
         return 1.0 + ((u_val - 1.0) / 21.0) * 7.0
 
     df["Uzunluk_Carpani"] = df.apply(uzunluk_hesapla, axis=1)
@@ -147,12 +147,10 @@ def veri_isle_kaynak():
     min_hz, max_hz = df["Ham_Zorluk"].min(), df["Ham_Zorluk"].max()
     df["Zorluk Katsayısı"] = 1.0 if max_hz == min_hz else 1.0 + ((df["Ham_Zorluk"] - min_hz) / (max_hz - min_hz)) * 9.0
 
-    # Ham İş Yüküne Uzunluk Çarpanı Eklendi
     df["Ham_İş_Yükü"] = df['Zorluk Katsayısı'] * df['Normalize_Kapasite'] * df['Çelik Çarpanı'] * df['Normalize_Ebat'] * df['Normalize_Teknik'] * df['Tabla_Carpani'] * df['Kilitleme_Carpani'] * df['Uzunluk_Carpani'] * df['Üretim Adedi']
     df["Günlük_Hız"] = df["Ham_İş_Yükü"] / df["Net Üretim Süresi (Gün)"]
     medyan_hiz = df["Günlük_Hız"].median()
     
-    # %20 Hız Verimlilik Sınırı
     df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
     
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
@@ -268,7 +266,6 @@ def veri_isle_montaj():
     df_m["Toplam Süre (Gün)"] = (pd.to_datetime(df_m.get("Bitiş"), dayfirst=True, errors='coerce') - pd.to_datetime(df_m.get("Başlangıç"), dayfirst=True, errors='coerce')).dt.days
     df_m["Net Üretim Süresi (Gün)"] = df_m["Toplam Süre (Gün)"].apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
 
-    # Uzunluk Çarpanı Montaj İş Yüküne Dahil Edildi
     df_m["Ham_İş_Yükü"] = df_m["Zorluk Katsayısı"] * df_m["Normalize_Kapasite"] * df_m["Normalize_Ebat"] * df_m["Tabla_Carpani"] * df_m["Kilitleme_Carpani"] * df_m["Uzunluk_Carpani"] * df_m["Normalize_Mesafe"] * df_m["Ortam_Montaj_Çarpanı"] * df_m["Üretim Adedi"]
     df_m["Günlük_Hız"] = df_m["Ham_İş_Yükü"] / df_m["Net Üretim Süresi (Gün)"]
     medyan_hiz = df_m["Günlük_Hız"].median()
@@ -334,7 +331,6 @@ def veri_isle_elektrik():
 
     df_e["Net Süre"] = pd.to_numeric(df_e["Süre(Saat)"], errors='coerce').fillna(1.0).apply(lambda x: max(x, 0.1))
 
-    # Uzunluk Çarpanı Elektrik İş Yüküne Dahil Edildi
     df_e["Ham_İş_Yükü"] = (
         df_e["Zorluk Katsayısı"] * df_e["Normalize_Kapasite"] * df_e["Normalize_Ebat"] * df_e["Uzunluk_Carpani"] *
         df_e["Normalize_Durak"] * df_e["Kilitleme_Carpani"] * df_e["Sıfırlama_Carpani"] * 
@@ -411,6 +407,8 @@ df_op_all = pd.concat([op_k, op_h, op_m, op_e], ignore_index=True)
 tum_operatorler = sorted(list(df_op_all["Operatörler"].unique())) if not df_op_all.empty else []
 
 # --- SOL MENÜ (FİLTRELER) ---
+st.sidebar.markdown("## 🏭 Zafer Lift")
+st.sidebar.caption("Üretim Takip ve Veri Analitiği")
 st.sidebar.header("🔍 Fabrika Filtreleri")
 st.sidebar.info("💡 'Tümü' seçiliyken ürün analizinde sadece Kaynak Atölyesi gösterilir. Özel birimleri incelemek için listeden seçin.")
 secilen_tezgah = st.sidebar.selectbox("İstasyon / Tezgah Seçin", ["Tümü"] + tum_tezgahlar)
@@ -426,31 +424,168 @@ with tab1:
             df_k_filt = df_k.copy()
             if secilen_tezgah != "Tümü": df_k_filt = df_k_filt[df_k_filt["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_k_filt = df_k_filt[df_k_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
-            st.dataframe(df_k_filt.groupby(["Model"]).agg({"Zorluk Katsayısı": "mean", "Üretim Adedi": "sum", "Net Üretim Süresi (Gün)": "mean", "Sipariş No": "count"}).reset_index().round(2), use_container_width=True)
+            
+            # KPI KARTLARI (KAYNAK)
+            toplam_adet = int(df_k_filt["Üretim Adedi"].sum())
+            ort_sure = df_k_filt["Net Üretim Süresi (Gün)"].mean()
+            toplam_siparis = df_k_filt["Sipariş No"].nunique()
+            model_cesidi = df_k_filt["Model"].nunique()
+
+            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+            with m_col1:
+                with st.container(border=True): st.metric("📦 Toplam Üretim", f"{toplam_adet} Adet")
+            with m_col2:
+                with st.container(border=True): st.metric("⏱️ Ort. Üretim Süresi", f"{ort_sure:.1f} Gün" if pd.notna(ort_sure) else "0 Gün")
+            with m_col3:
+                with st.container(border=True): st.metric("📑 Toplam Sipariş", f"{toplam_siparis} Adet")
+            with m_col4:
+                with st.container(border=True): st.metric("🏷️ Model Çeşidi", f"{model_cesidi} Model")
+
+            st.write("") # Boşluk
+            
+            # MODERN TABLO (KAYNAK)
+            ozet_df = df_k_filt.groupby(["Model"]).agg({
+                "Zorluk Katsayısı": "mean", 
+                "Üretim Adedi": "sum", 
+                "Net Üretim Süresi (Gün)": "mean", 
+                "Sipariş No": "count"
+            }).reset_index().round(2)
+            
+            ozet_df.rename(columns={"Sipariş No": "Sipariş Adedi"}, inplace=True)
+            max_adet = ozet_df["Üretim Adedi"].max() if not ozet_df.empty else 100
+
+            st.dataframe(
+                ozet_df,
+                column_config={
+                    "Model": st.column_config.TextColumn("Ürün Modeli", width="medium"),
+                    "Zorluk Katsayısı": st.column_config.NumberColumn("Zorluk Kats.", format="%.1f"),
+                    "Üretim Adedi": st.column_config.ProgressColumn("Toplam Üretim (Adet)", format="%d", min_value=0, max_value=int(max_adet)),
+                    "Net Üretim Süresi (Gün)": st.column_config.NumberColumn("Ort. Süre", format="%.1f Gün"),
+                    "Sipariş Adedi": st.column_config.NumberColumn("Sipariş Sayısı", format="%d")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
     
     elif secilen_tezgah in tezgahlar_h:
         st.subheader("💧 Hidrolik Atölyesi Özeti (Saat Bazlı)")
         if not df_h.empty:
             df_h_filt = df_h[df_h["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_h_filt = df_h_filt[df_h_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            
+            # KPI KARTLARI (HİDROLİK)
+            toplam_adet = int(df_h_filt["Üretim Adedi"].sum())
+            ort_sure = df_h_filt["Net Süre"].mean()
+            toplam_siparis = df_h_filt["Sipariş No"].nunique()
+            
+            m_col1, m_col2, m_col3 = st.columns(3)
+            with m_col1: 
+                with st.container(border=True): st.metric("📦 Toplam Üretim", f"{toplam_adet} Adet")
+            with m_col2: 
+                with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} Saat" if pd.notna(ort_sure) else "0 Saat")
+            with m_col3: 
+                with st.container(border=True): st.metric("📑 Toplam Sipariş", f"{toplam_siparis} Adet")
+            
+            st.write("")
+            
+            # MODERN TABLO (HİDROLİK)
             gosterim_h = df_h_filt[["Sipariş No", "Üretim Adedi", "Yağ Tankı(lt)", "Motor(kW)", "Ham_İş_Yükü", "Net Süre"]]
-            st.dataframe(gosterim_h.round(2), use_container_width=True)
+            max_adet_h = gosterim_h["Üretim Adedi"].max() if not gosterim_h.empty else 100
+            
+            st.dataframe(
+                gosterim_h,
+                column_config={
+                    "Sipariş No": st.column_config.TextColumn("Sipariş No"),
+                    "Üretim Adedi": st.column_config.ProgressColumn("Üretim Adedi", format="%d", min_value=0, max_value=int(max_adet_h)),
+                    "Yağ Tankı(lt)": st.column_config.NumberColumn("Yağ Tankı (lt)", format="%.1f"),
+                    "Motor(kW)": st.column_config.NumberColumn("Motor (kW)", format="%.1f"),
+                    "Ham_İş_Yükü": st.column_config.NumberColumn("İş Yükü Puanı", format="%.2f"),
+                    "Net Süre": st.column_config.NumberColumn("Net Süre", format="%.1f Saat")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
     elif secilen_tezgah in tezgahlar_m:
         st.subheader("🚚 Montaj Seferleri ve Özeti (Gün Bazlı)")
         if not df_m.empty:
             df_m_filt = df_m[df_m["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_m_filt = df_m_filt[df_m_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            
+            # KPI KARTLARI (MONTAJ)
+            toplam_sefer = df_m_filt["Sipariş No"].nunique()
+            ort_mesafe = df_m_filt["Mesafe (km)"].mean()
+            ort_sure = df_m_filt["Net Üretim Süresi (Gün)"].mean()
+            
+            m_col1, m_col2, m_col3 = st.columns(3)
+            with m_col1: 
+                with st.container(border=True): st.metric("🚚 Toplam Sefer", f"{toplam_sefer} Adet")
+            with m_col2: 
+                with st.container(border=True): st.metric("📍 Ort. Mesafe", f"{ort_mesafe:.1f} km" if pd.notna(ort_mesafe) else "0 km")
+            with m_col3: 
+                with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} Gün" if pd.notna(ort_sure) else "0 Gün")
+
+            st.write("")
+            
+            # MODERN TABLO (MONTAJ)
             gosterim_df = df_m_filt[["Sipariş No", "Model", "Montaj Yeri", "Mesafe (km)", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı", "Ham_İş_Yükü", "Net Üretim Süresi (Gün)"]]
-            st.dataframe(gosterim_df.round(2), use_container_width=True)
+            max_mesafe = gosterim_df["Mesafe (km)"].max() if not gosterim_df.empty else 1000
+            
+            st.dataframe(
+                gosterim_df,
+                column_config={
+                    "Sipariş No": st.column_config.TextColumn("Sipariş No"),
+                    "Model": st.column_config.TextColumn("Model"),
+                    "Montaj Yeri": st.column_config.TextColumn("Montaj Yeri"),
+                    "Mesafe (km)": st.column_config.ProgressColumn("Mesafe (km)", format="%.1f", min_value=0, max_value=float(max_mesafe)),
+                    "Normalize_Mesafe": st.column_config.NumberColumn("Mesafe Çarpanı", format="%.2f"),
+                    "Ortam_Montaj_Çarpanı": st.column_config.NumberColumn("Ortam Çarpanı", format="%.2f"),
+                    "Ham_İş_Yükü": st.column_config.NumberColumn("İş Yükü Puanı", format="%.2f"),
+                    "Net Üretim Süresi (Gün)": st.column_config.NumberColumn("Net Süre", format="%.1f Gün")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
     elif secilen_tezgah in tezgahlar_e:
         st.subheader("⚡ Elektrik Atölyesi Özeti (Saat Bazlı)")
         if not df_e.empty:
             df_e_filt = df_e[df_e["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_e_filt = df_e_filt[df_e_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            
+            # KPI KARTLARI (ELEKTRİK)
+            toplam_is = df_e_filt["Sipariş No"].nunique()
+            ort_sure = df_e_filt["Net Süre"].mean()
+            plc_oran = (df_e_filt["PLC"].astype(float) > 0).mean() * 100 if "PLC" in df_e_filt.columns else 0
+            
+            m_col1, m_col2, m_col3 = st.columns(3)
+            with m_col1: 
+                with st.container(border=True): st.metric("⚡ Toplam İş", f"{toplam_is} Adet")
+            with m_col2: 
+                with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} Saat" if pd.notna(ort_sure) else "0 Saat")
+            with m_col3: 
+                with st.container(border=True): st.metric("🔌 PLC'li İş Oranı", f"%{plc_oran:.0f}" if pd.notna(plc_oran) else "%0")
+
+            st.write("")
+            
+            # MODERN TABLO (ELEKTRİK)
             gosterim_e = df_e_filt[["Sipariş No", "Model", "Durak Sayısı", "PLC", "PLC Model", "Ham_İş_Yükü", "Net Süre"]]
-            st.dataframe(gosterim_e.round(2), use_container_width=True)
+            max_durak = gosterim_e["Durak Sayısı"].max() if not gosterim_e.empty else 10
+            
+            st.dataframe(
+                gosterim_e,
+                column_config={
+                    "Sipariş No": st.column_config.TextColumn("Sipariş No"),
+                    "Model": st.column_config.TextColumn("Model"),
+                    "Durak Sayısı": st.column_config.ProgressColumn("Durak Sayısı", format="%d", min_value=0, max_value=int(max_durak)),
+                    "PLC": st.column_config.NumberColumn("PLC (0/1)", format="%d"),
+                    "PLC Model": st.column_config.TextColumn("PLC Model"),
+                    "Ham_İş_Yükü": st.column_config.NumberColumn("İş Yükü Puanı", format="%.2f"),
+                    "Net Süre": st.column_config.NumberColumn("Net Süre", format="%.1f Saat")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
 with tab2:
     st.subheader("🏆 Fabrika Geneli Operatör Performans Sıralaması")
@@ -463,8 +598,23 @@ with tab2:
         final_op_tablosu = op_gosterim.groupby("Operatörler").agg(
             {"Kişi Başı Puan": "sum", "Sipariş No": "count", "Departman": lambda x: ", ".join(x.unique())}
         ).reset_index().round(1).sort_values("Kişi Başı Puan", ascending=False)
+        
         final_op_tablosu.rename(columns={"Sipariş No": "Tamamlanan İş", "Kişi Başı Puan": "Performans Skoru (100 Üzerinden)"}, inplace=True)
-        st.dataframe(final_op_tablosu, use_container_width=True)
+        
+        # OPERATÖR PERFORMANS TABLOSUNU DA MODERNLEŞTİRELİM
+        max_skor = final_op_tablosu["Performans Skoru (100 Üzerinden)"].max() if not final_op_tablosu.empty else 100
+        
+        st.dataframe(
+            final_op_tablosu,
+            column_config={
+                "Operatörler": st.column_config.TextColumn("Operatör İsimleri", width="medium"),
+                "Tamamlanan İş": st.column_config.NumberColumn("Tamamlanan İş (Adet)", format="%d"),
+                "Departman": st.column_config.TextColumn("Bulunduğu Departmanlar"),
+                "Performans Skoru (100 Üzerinden)": st.column_config.ProgressColumn("Performans Skoru", format="%.1f", min_value=0, max_value=float(max_skor))
+            },
+            hide_index=True,
+            use_container_width=True
+        )
     else:
         st.info("Gösterilecek operatör verisi bulunamadı.")
 
