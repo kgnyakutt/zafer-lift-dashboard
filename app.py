@@ -10,6 +10,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 import warnings
+import json
+import urllib.request
 warnings.filterwarnings("ignore")
 
 # Sayfa Yapılandırması (Favicon eklendi)
@@ -216,13 +218,32 @@ def veri_isle_hidrolik():
 # 3. MONTAJ EKİBİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400)
 def mesafe_hesapla_api(hedef_sehir):
     if pd.isna(hedef_sehir) or str(hedef_sehir).strip() == "": return 10.0
     try:
         geolocator = Nominatim(user_agent="zafer_lift_app")
         merkez = geolocator.geocode("Turgutlu, Manisa, Turkey")
-        hedef = geolocator.geocode(f"{hedef_sehir}, Turkey")
-        if merkez and hedef: return geodesic((merkez.latitude, merkez.longitude), (hedef.latitude, hedef.longitude)).km
+        hedef = geolocator.geocode(f"{hedef_sehir}")
+        
+        if merkez and hedef:
+            lat1, lon1 = merkez.latitude, merkez.longitude
+            lat2, lon2 = hedef.latitude, hedef.longitude
+            
+            # 1. YÖNTEM: OSRM API ile Gerçek Karayolu (Sürüş) Mesafesi Çekme
+            try:
+                url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"
+                req = urllib.request.Request(url, headers={'User-Agent': 'zafer_lift_app'})
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = json.loads(response.read().decode())
+                    if data.get("code") == "Ok":
+                        driving_distance_km = data["routes"][0]["distance"] / 1000.0
+                        return driving_distance_km
+            except:
+                # 2. YÖNTEM: İnternet veya API çökerse, Kuş Uçuşunu Karayoluna Çeviren Formül (Kuş Uçuşu * 1.28)
+                kus_ucusu = geodesic((lat1, lon1), (lat2, lon2)).km
+                return kus_ucusu * 1.28 
+                
     except: pass
     return 50.0 
 
