@@ -14,7 +14,7 @@ import json
 import urllib.request
 warnings.filterwarnings("ignore")
 
-# Sayfa Yapılandırması (Favicon eklendi)
+# Sayfa Yapılandırması
 st.set_page_config(
     page_title="Zafer Lift - Üretim ve Performans Panosu", 
     page_icon="light-logo-zafer-lift.webp", 
@@ -54,7 +54,7 @@ ZORLUK_HARITASI = {
     "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
     "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
     "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0,
-    "EAP3": 1.0 # EAP3 eklendi
+    "EAP3": 1.0 
 }
 MAKSIMUM_CARPAN_KAPASITE = 2.0   
 MAKSIMUM_CARPAN_M2 = 1.3       
@@ -66,6 +66,13 @@ def urun_makasli_mi(urun):
     if "MAKASLI" in urun_str: return True
     return any(kod in urun_str for kod in MAKASLI_KODLAR)
 
+# VAR/YOK ve 1/0 Dönüştürücü Fonksiyon (Sihirli Çözüm)
+def parse_var_yok(val):
+    if pd.isna(val): return 0.0
+    s = str(val).strip().lower()
+    if s in ['var', '1', '1.0', 'evet', 'true', 'dijital']: return 1.0
+    return 0.0
+
 # ==========================================
 # 1. KAYNAK ATÖLYESİ VERİ İŞLEME
 # ==========================================
@@ -75,6 +82,10 @@ def veri_isle_kaynak():
     try: df = pd.read_csv(sheet_url)
     except: return pd.DataFrame()
     if df.empty: return df
+    
+    df.columns = df.columns.str.strip()
+    # Sütun adlarını kodun anlayacağı standartlara zorla çeviriyoruz
+    df.rename(columns={"Bekleme (Gün)": "Bekleme Süresi (Gün)", "Kitleme": "Kilitleme"}, inplace=True)
     
     def urun_normalize(deger):
         if pd.isna(deger): return ""
@@ -105,8 +116,7 @@ def veri_isle_kaynak():
         match = re.search(r'[\d\.]+', s)
         return float(match.group()) / 1_000_000.0 if match and float(match.group()) > 100 else (float(match.group()) if match else 1.0)
         
-    df.columns = df.columns.str.strip()
-    hedef_sutunlar = ["Sipariş No", "Model", "Çelik Durumu (1/0)", "Kapasite", "Platform Ebat mm", "Platform Ebat (m2)", "Teknik Puan", "Başlangıç", "Bitiş", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk", "Bekleme Süresi (Gün)", "Tabla Kapısı", "Kilitleme", "Uzunluk"]
+    hedef_sutunlar = ["Sipariş No", "Model", "Çelik Durumu (1/0)", "Kapasite", "Platform Ebat mm", "Teknik Puan", "Başlangıç", "Bitiş", "Tezgah", "Operatörler", "Üretim Adedi", "Tel Fonk", "Bekleme Süresi (Gün)", "Tabla Kapısı", "Kilitleme", "Uzunluk"]
     for col in hedef_sutunlar:
         if col not in df.columns: df[col] = 0.0 if "Durumu" in col or col in ["Tabla Kapısı", "Kilitleme", "Üretim Adedi", "Bekleme Süresi (Gün)", "Uzunluk"] else ""
     df = df[hedef_sutunlar]
@@ -120,9 +130,12 @@ def veri_isle_kaynak():
     df["Ham_Zorluk"] = df["Model"].apply(dinamik_zorluk)
     celik_val = pd.to_numeric(df["Çelik Durumu (1/0)"], errors='coerce').fillna(0.0)
     df["Çelik Çarpanı"] = celik_val + 1.0
-    val_tabla = pd.to_numeric(df["Tabla Kapısı"], errors='coerce').fillna(0.0)
+    
+    # Var/Yok metinlerini sayılara çevirme (Kaynak)
+    val_tabla = df["Tabla Kapısı"].apply(parse_var_yok)
     df["Tabla_Carpani"] = np.where(val_tabla > 0, 1.1, 1.0)
-    val_kilit = pd.to_numeric(df["Kilitleme"], errors='coerce').fillna(0.0)
+    
+    val_kilit = df["Kilitleme"].apply(parse_var_yok)
     df["Kilitleme_Carpani"] = np.where(val_kilit > 0, 1.2, 1.0)
 
     def uzunluk_hesapla(row):
@@ -134,8 +147,7 @@ def veri_isle_kaynak():
 
     df["Uzunluk_Carpani"] = df.apply(uzunluk_hesapla, axis=1)
     df["Kapasite_G"] = df["Kapasite"].apply(kapasite_ayikla).replace(0, 1.0)
-    if "Platform Ebat (m2)" not in df.columns and "Platform Ebat mm" in df.columns: df["Platform Ebat (m2)"] = df["Platform Ebat mm"]
-    df["Ebat_G"] = df["Platform Ebat (m2)"].apply(metrekare_ayikla).replace(0, 1.0)
+    df["Ebat_G"] = df["Platform Ebat mm"].apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df["Teknik Puan"], errors='coerce').fillna(1.0)
     
     dt_bas = pd.to_datetime(df["Başlangıç"], dayfirst=True, errors='coerce')
@@ -218,7 +230,6 @@ def veri_isle_hidrolik():
 # 3. MONTAJ EKİBİ VERİ İŞLEME
 # ==========================================
 @st.cache_data(ttl=86400)
-@st.cache_data(ttl=86400)
 def mesafe_hesapla_api(hedef_sehir):
     if pd.isna(hedef_sehir) or str(hedef_sehir).strip() == "": return 10.0
     try:
@@ -230,7 +241,6 @@ def mesafe_hesapla_api(hedef_sehir):
             lat1, lon1 = merkez.latitude, merkez.longitude
             lat2, lon2 = hedef.latitude, hedef.longitude
             
-            # 1. YÖNTEM: OSRM API ile Gerçek Karayolu (Sürüş) Mesafesi Çekme
             try:
                 url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"
                 req = urllib.request.Request(url, headers={'User-Agent': 'zafer_lift_app'})
@@ -240,7 +250,6 @@ def mesafe_hesapla_api(hedef_sehir):
                         driving_distance_km = data["routes"][0]["distance"] / 1000.0
                         return driving_distance_km
             except:
-                # 2. YÖNTEM: İnternet veya API çökerse, Kuş Uçuşunu Karayoluna Çeviren Formül (Kuş Uçuşu * 1.28)
                 kus_ucusu = geodesic((lat1, lon1), (lat2, lon2)).km
                 return kus_ucusu * 1.28 
                 
@@ -255,6 +264,16 @@ def veri_isle_montaj():
     if df_m.empty: return df_m
 
     df_m.columns = df_m.columns.str.strip()
+    
+    # Sütun adı farklılıklarını kodla eşitliyoruz
+    duzeltmeler = {
+        "Montaj Durumu": "Montaj durumu", 
+        "montaj durumu": "Montaj durumu",
+        "ORTAM": "Ortam", 
+        "ortam": "Ortam"
+    }
+    df_m.rename(columns=duzeltmeler, inplace=True)
+
     hedef_sutunlar_m = ["Sipariş No", "Başlangıç", "Bitiş", "Tezgah", "Operatörler", "Üretim Adedi", "Montaj Yeri", "Model", "Ortam", "Montaj durumu"]
     for col in hedef_sutunlar_m:
         if col not in df_m.columns: df_m[col] = 1.0 if col == "Üretim Adedi" else ""
@@ -282,12 +301,14 @@ def veri_isle_montaj():
     min_km, max_km = df_m["Mesafe (km)"].min(), df_m["Mesafe (km)"].max()
     df_m["Normalize_Mesafe"] = 1.0 if max_km == min_km else 1.0 + ((df_m["Mesafe (km)"] - min_km) / (max_km - min_km)) * 1.5
 
+    # İç, Dış, Vinç, Manuel vb. kelimelerdeki Türkçe karakterleri %100 çözen yapı
     def ortam_montaj_carpani(row):
-        ortam = str(row.get("Ortam", "")).strip().lower()
-        durum = str(row.get("Montaj durumu", "")).strip().lower()
-        if "1" in ortam or "İç" in ortam or "ic" in ortam:
-            if "Vinç" in durum or "vinc" in durum: return 2.0
-            elif "Manuel" in durum or "el" in durum: return 4.0
+        ortam = str(row.get("Ortam", "")).strip().lower().replace("ı", "i").replace("ç", "c").replace("ş", "s")
+        durum = str(row.get("Montaj durumu", "")).strip().lower().replace("ı", "i").replace("ç", "c").replace("ş", "s")
+        
+        if "ic" in ortam or "1" in ortam:
+            if "vinc" in durum: return 2.0
+            elif "manuel" in durum or "el" in durum: return 4.0
             return 2.0 
         return 1.0 
 
@@ -324,9 +345,11 @@ def veri_isle_elektrik():
     if df_e.empty: return df_e
 
     df_e.columns = df_e.columns.str.strip()
+    df_e.rename(columns={"Kitleme": "Kilitleme"}, inplace=True) # Tablodaki "Kitleme" ismini "Kilitleme" olarak düzeltiyoruz
+    
     hedef_sutunlar_e = ["Sipariş No", "Süre(Saat)", "Tezgah", "Operatörler", "Üretim Adedi", "Model", "Durak Sayısı", "Kilitleme", "PLC", "PLC Model", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
     for col in hedef_sutunlar_e:
-        if col not in df_e.columns: df_e[col] = 1.0 if col in ["Üretim Adedi", "Durak Sayısı", "Süre(Saat)"] else (0.0 if col in ["Kilitleme", "PLC", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"] else "")
+        if col not in df_e.columns: df_e[col] = ""
     df_e = df_e[hedef_sutunlar_e]
 
     df_e["Sipariş No"] = df_e["Sipariş No"].fillna("BELİRSİZ").astype(str).str.strip()
@@ -348,17 +371,13 @@ def veri_isle_elektrik():
     min_d, max_d = durak_vals.min(), durak_vals.max()
     df_e["Normalize_Durak"] = 1.0 if max_d == min_d else 1.0 + ((durak_vals - min_d) / (max_d - min_d)) * 0.5
 
-    parametre_listesi = ["Kilitleme", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
+    # Elektrik "var"/"yok" metinlerini matematiksel değerlere dönüştürme
+    parametre_listesi = ["Kilitleme", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "İkaz Lambaları", "PLC", "Buton Tipi"]
     for p in parametre_listesi:
-        val = pd.to_numeric(df_e[p], errors='coerce').fillna(0.0)
+        val = df_e[p].apply(parse_var_yok)
         df_e[f"{p}_Carpani"] = np.where(val > 0, 1.2, 1.0)
 
-    plc_val = pd.to_numeric(df_e["PLC"], errors='coerce').fillna(0.0)
-    df_e["PLC_Carpani"] = np.where(plc_val > 0, 1.2, 1.0)
-
     def plc_model_carpani(row):
-        p_val = pd.to_numeric(row.get("PLC", 0.0), errors='coerce')
-        if pd.isna(p_val) or p_val == 0: return 1.0
         model = str(row.get("PLC Model", "")).strip().lower()
         if any(m in model for m in ["gemo", "delta", "omron", "schneider", "siemens"]): return 1.1
         return 1.1
@@ -388,13 +407,11 @@ def yapay_zeka_egit(df_model, X_cols, birim="gun"):
     df_m = df_model.dropna(subset=[hedef_sutun] + X_cols).copy()
     df_m = df_m[df_m[hedef_sutun] > 0]
     
-    # Endüstri Mühendisliği Çözümü: YZ'ye süreyi değil, Toplam Eforu öğretiyoruz.
     df_m["Kişi Sayısı"] = pd.to_numeric(df_m["Kişi Sayısı"], errors="coerce").fillna(1.0)
     df_m["Toplam_Efor"] = df_m[hedef_sutun] * df_m["Kişi Sayısı"]
     
     if len(df_m) < 5: return None, None, None, None, None
     
-    # Kişi Sayısını eğitim özelliklerinden (X) çıkartıyoruz ki makine kapasite boyutuna göre eforu anlasın
     X_ozellikler = [c for c in X_cols if c != "Kişi Sayısı"]
     X = df_m[X_ozellikler].values
     y_net = df_m["Toplam_Efor"].values
@@ -610,7 +627,9 @@ with tab1:
             
             toplam_is = df_e_filt["Sipariş No"].nunique()
             ort_sure = df_e_filt["Net Süre"].mean()
-            plc_oran = (pd.to_numeric(df_e_filt["PLC"], errors='coerce').fillna(0) > 0).mean() * 100 if "PLC" in df_e_filt.columns else 0
+            
+            # Hatasız PLC Oranı Hesaplama (var = 1, yok = 0)
+            plc_oran_val = df_e_filt["PLC"].apply(parse_var_yok).mean() * 100 if "PLC" in df_e_filt.columns else 0
             
             m_col1, m_col2, m_col3 = st.columns(3)
             with m_col1: 
@@ -618,7 +637,7 @@ with tab1:
             with m_col2: 
                 with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} Saat" if pd.notna(ort_sure) else "0 Saat")
             with m_col3: 
-                with st.container(border=True): st.metric("🔌 PLC'li İş Oranı", f"%{plc_oran:.0f}" if pd.notna(plc_oran) else "%0")
+                with st.container(border=True): st.metric("🔌 PLC'li İş Oranı", f"%{plc_oran_val:.0f}" if pd.notna(plc_oran_val) else "%0")
 
             st.write("")
             
@@ -636,7 +655,7 @@ with tab1:
                     "Sipariş No": st.column_config.TextColumn("Sipariş No"),
                     "Model": st.column_config.TextColumn("Model"),
                     "Durak Sayısı": st.column_config.ProgressColumn("Durak Sayısı", format="%d", min_value=0, max_value=int(max_durak)),
-                    "PLC": st.column_config.NumberColumn("PLC (0/1)", format="%d"),
+                    "PLC": st.column_config.TextColumn("PLC Durumu"),
                     "PLC Model": st.column_config.TextColumn("PLC Model"),
                     "Ham_İş_Yükü": st.column_config.NumberColumn("İş Yükü Puanı", format="%.2f"),
                     "Net Süre": st.column_config.NumberColumn("Net Süre", format="%.1f Saat")
@@ -689,17 +708,17 @@ with tab3:
                 in_k_urun = st.selectbox("Model", sorted(df_k["Model"].unique()))
                 in_k_kapasite = st.number_input("Kapasite (Ton)", value=1.0)
                 in_k_m2 = st.number_input("Platform Ebatı (m2)", value=5.0)
-                in_k_tabla = st.selectbox("Tabla Kapısı", [0, 1])
+                in_k_tabla = st.selectbox("Tabla Kapısı", ["Yok", "Var"])
             with col2:
                 in_k_kisi = st.number_input("Ekip Sayısı", min_value=1, value=1)
                 in_k_teknik = st.slider("Teknik Zorluk", 1.0, 10.0, 1.0)
                 in_k_celik = st.selectbox("Çelik Durumu", [0, 1])
-                in_k_kilit = st.selectbox("Kilitleme", [0, 1])
+                in_k_kilit = st.selectbox("Kilitleme (Kitleme)", ["Yok", "Var"])
             if st.button("🚀 Tahmin Et (Kaynak)"):
-                t_carp = 1.1 if in_k_tabla == 1 else 1.0
-                k_carp = 1.2 if in_k_kilit == 1 else 1.0
+                t_carp = 1.1 if in_k_tabla == "Var" else 1.0
+                k_carp = 1.2 if in_k_kilit == "Var" else 1.0
                 u_carp = 1.0 
-                # Model artık kişi sayısını beklemiyor, toplam eforu verecek. O yüzden array'den in_k_kisi'yi çıkardık.
+                
                 ham_veri = np.array([[2.5, 1.2, 1.1, 1.0 + (in_k_teknik/10), in_k_celik+1.0, t_carp, k_carp, u_carp]]) 
                 toplam_efor = max(rf_net.predict(sc.transform(ham_veri))[0], 1.0)
                 tahmin_sure = toplam_efor / in_k_kisi
@@ -734,13 +753,13 @@ with tab3:
             col1, col2 = st.columns(2)
             with col1:
                 in_m_hedef = st.text_input("Gidilecek Şehir/İlçe (Örn: Çorlu, Tekirdağ)")
-                in_m_ortam = st.selectbox("Montaj Ortamı", ["Dış (0)", "İç (1)"])
+                in_m_ortam = st.selectbox("Montaj Ortamı", ["Dış", "İç"])
             with col2:
-                in_m_durum = st.selectbox("Montaj Durumu", ["Vinç", "Manuel"])
+                in_m_durum = st.selectbox("Montaj Durumu", ["Manuel", "Vinç"])
                 in_m_kisi = st.number_input("Montaj Ekibi Kişi Sayısı", min_value=1, value=2)
             if st.button("🚀 Tahmin Et (Montaj)"):
                 mesafe = mesafe_hesapla_api(in_m_hedef)
-                o_carp = 1.0 if "Dış" in in_m_ortam else (2.0 if "Vinç" in in_m_durum else 4.0)
+                o_carp = 1.0 if in_m_ortam == "Dış" else (2.0 if in_m_durum == "Vinç" else 4.0)
                 
                 ham_m = np.array([[1.5, 1.2, 1.2, 1.0, 1.0, 1.0, 1.2, o_carp]])
                 toplam_efor = max(rf_net.predict(sc.transform(ham_m))[0], 0.5)
@@ -755,13 +774,13 @@ with tab3:
             col1, col2 = st.columns(2)
             with col1:
                 in_e_durak = st.number_input("Durak Sayısı", min_value=1, value=3)
-                in_e_plc = st.selectbox("PLC Var mı?", [0, 1])
-                in_e_model = st.selectbox("PLC Model", ["Gemo", "Delta", "Omron", "Schneider", "Siemens"])
+                in_e_plc = st.selectbox("PLC Var mı?", ["Yok", "Var"])
+                in_e_model = st.selectbox("PLC Model", ["Yok", "Gemo", "Delta", "Omron", "Schneider", "Siemens"])
             with col2:
                 in_e_kisi = st.number_input("Elektrik Ekibi Kişi Sayısı", min_value=1, value=2)
             if st.button("🚀 Tahmin Et (Elektrik)"):
-                p_carp = 1.2 if in_e_plc == 1 else 1.0
-                m_carp = 1.1 if in_e_plc == 1 else 1.0
+                p_carp = 1.2 if in_e_plc == "Var" else 1.0
+                m_carp = 1.1 if in_e_model != "Yok" else 1.0
                 
                 ham_e = np.array([[1.5, 1.2, 1.2, 1.0, 1.1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, p_carp, m_carp]])
                 toplam_efor = max(rf_net.predict(sc.transform(ham_e))[0], 0.5)
@@ -788,8 +807,8 @@ with tab3:
                     in_s_urun = st.selectbox("Model Seçimi", sorted(df_k["Model"].unique()), key="s_urun")
                     in_s_kapasite = st.number_input("Kapasite (Ton)", value=1.0, key="s_kap")
                     in_s_m2 = st.number_input("Platform Ebatı (m2)", value=5.0, key="s_m2")
-                    in_s_tabla = st.selectbox("Tabla Kapısı Var mı?", [0, 1], key="s_tab")
-                    in_s_kilit = st.selectbox("Kilitleme Var mı?", [0, 1], key="s_kil")
+                    in_s_tabla = st.selectbox("Tabla Kapısı Var mı?", ["Yok", "Var"], key="s_tab")
+                    in_s_kilit = st.selectbox("Kilitleme (Kitleme) Var mı?", ["Yok", "Var"], key="s_kil")
                 
                 with col2:
                     st.markdown("**2. Kaynak Detayları**")
@@ -800,21 +819,21 @@ with tab3:
                 with col3:
                     st.markdown("**3. Elektrik Detayları**")
                     in_s_durak = st.number_input("Durak Sayısı", min_value=1, value=3, key="s_dur")
-                    in_s_plc = st.selectbox("PLC Kullanılacak mı?", [0, 1], key="s_plc")
-                    in_s_model = st.selectbox("PLC Markası", ["Gemo", "Delta", "Omron", "Schneider", "Siemens"], key="s_mod")
+                    in_s_plc = st.selectbox("PLC Kullanılacak mı?", ["Yok", "Var"], key="s_plc")
+                    in_s_model = st.selectbox("PLC Markası", ["Yok", "Gemo", "Delta", "Omron", "Schneider", "Siemens"], key="s_mod")
                     in_s_kisi_e = st.number_input("Elektrik Ekibi Kişi Sayısı", min_value=1, value=1, key="s_kisi_e")
                 
                 if st.button("🚀 Toplam Sevk Süresini Hesapla", use_container_width=True):
-                    t_carp = 1.1 if in_s_tabla == 1 else 1.0
-                    k_carp = 1.2 if in_s_kilit == 1 else 1.0
+                    t_carp = 1.1 if in_s_tabla == "Var" else 1.0
+                    k_carp = 1.2 if in_s_kilit == "Var" else 1.0
                     u_carp = 1.0 
                     
                     ham_veri_k = np.array([[2.5, 1.2, 1.1, 1.0 + (in_s_teknik/10), in_s_celik+1.0, t_carp, k_carp, u_carp]]) 
                     tahmin_kaynak_efor = max(rf_net_k.predict(sc_k.transform(ham_veri_k))[0], 1.0)
                     tahmin_kaynak_gun = tahmin_kaynak_efor / in_s_kisi_k
                     
-                    p_carp = 1.2 if in_s_plc == 1 else 1.0
-                    m_carp = 1.1 if in_s_plc == 1 else 1.0
+                    p_carp = 1.2 if in_s_plc == "Var" else 1.0
+                    m_carp = 1.1 if in_s_model != "Yok" else 1.0
                     ham_veri_e = np.array([[1.5, 1.2, 1.2, 1.0, 1.1, k_carp, 1.0, t_carp, 1.0, 1.0, 1.0, p_carp, m_carp]])
                     tahmin_elektrik_efor = max(rf_net_e.predict(sc_e.transform(ham_veri_e))[0], 0.5)
                     tahmin_elektrik_saat = tahmin_elektrik_efor / in_s_kisi_e
