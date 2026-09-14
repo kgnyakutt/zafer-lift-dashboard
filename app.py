@@ -142,7 +142,6 @@ def veri_isle_kaynak():
     df["Ebat_G"] = df["Platform Ebat (m2)"].apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df["Teknik Puan"], errors='coerce').fillna(1.0)
     
-    # --- YENİ: SADECE İŞ GÜNLERİNİ (HAFTA SONU HARİÇ) HESAPLAMA ---
     dt_bas = pd.to_datetime(df["Başlangıç"], dayfirst=True, errors='coerce')
     dt_bit = pd.to_datetime(df["Bitiş"], dayfirst=True, errors='coerce')
     
@@ -156,7 +155,6 @@ def veri_isle_kaynak():
     df["Toplam Süre (Gün)"] = [is_gunu_hesapla(b, bit) for b, bit in zip(dt_bas, dt_bit)]
     
     df["Bekleme Süresi (Gün)"] = pd.to_numeric(df["Bekleme Süresi (Gün)"], errors='coerce').fillna(0.0)
-    # Aynı gün biten işler 0 kalmasın diye minimum süreyi 1.0 gün olarak ayarlıyoruz.
     df["Net Üretim Süresi (Gün)"] = (df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]).apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
 
     min_kap, max_kap = df["Kapasite_G"].min(), df["Kapasite_G"].max()
@@ -173,7 +171,7 @@ def veri_isle_kaynak():
     df["Günlük_Hız"] = df["Ham_İş_Yükü"] / df["Net Üretim Süresi (Gün)"]
     medyan_hiz = df["Günlük_Hız"].median()
     
-    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
+    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.50, upper=1.50) # Alt sınırı alarm tespiti için genişlettik
     
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
@@ -220,7 +218,7 @@ def veri_isle_hidrolik():
     df["Saatlik_Hız"] = df["Ham_İş_Yükü"] / df["Net Süre"]
     medyan_hiz = df["Saatlik_Hız"].median()
     
-    df["Zaman Verimlilik Çarpanı"] = (df["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
+    df["Zaman Verimlilik Çarpanı"] = (df["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.50, upper=1.50)
     
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
@@ -286,7 +284,6 @@ def veri_isle_montaj():
 
     df_m["Ortam_Montaj_Çarpanı"] = df_m.apply(ortam_montaj_carpani, axis=1)
     
-    # --- YENİ: MONTAJ İÇİN SADECE İŞ GÜNLERİNİ HESAPLAMA ---
     dt_bas_m = pd.to_datetime(df_m.get("Başlangıç"), dayfirst=True, errors='coerce')
     dt_bit_m = pd.to_datetime(df_m.get("Bitiş"), dayfirst=True, errors='coerce')
     
@@ -305,7 +302,7 @@ def veri_isle_montaj():
     df_m["Günlük_Hız"] = df_m["Ham_İş_Yükü"] / df_m["Net Üretim Süresi (Gün)"]
     medyan_hiz = df_m["Günlük_Hız"].median()
     
-    df_m["Zaman Verimlilik Çarpanı"] = (df_m["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
+    df_m["Zaman Verimlilik Çarpanı"] = (df_m["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.50, upper=1.50)
     
     df_m['Operatörler'] = df_m['Operatörler'].fillna('').astype(str)
     df_m['Kişi Sayısı'] = df_m['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
@@ -376,7 +373,7 @@ def veri_isle_elektrik():
     df_e["Saatlik_Hız"] = df_e["Ham_İş_Yükü"] / df_e["Net Süre"]
     medyan_hiz = df_e["Saatlik_Hız"].median()
     
-    df_e["Zaman Verimlilik Çarpanı"] = (df_e["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.80, upper=1.20)
+    df_e["Zaman Verimlilik Çarpanı"] = (df_e["Saatlik_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.50, upper=1.50)
     
     df_e['Operatörler'] = df_e['Operatörler'].fillna('').astype(str)
     df_e['Kişi Sayısı'] = df_e['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
@@ -420,6 +417,7 @@ def get_op_points(df):
     
     max_is_yuku = d['Ham_İş_Yükü'].max()
     if max_is_yuku > 0:
+        # Zaman Verimlilik Çarpanı'nı burada 0.8 ile 1.2 arasına sıkıştırarak puanı hesaplıyoruz
         d['Normalize_İş_100'] = (d['Ham_İş_Yükü'] / max_is_yuku) * 100.0
     else:
         d['Normalize_İş_100'] = 0.0
@@ -429,7 +427,7 @@ def get_op_points(df):
     d['Operatörler'] = d['Operatörler'].str.strip()
     d = d[d['Operatörler'] != '']
     
-    d['Kişi Başı Puan'] = (d['Normalize_İş_100'] * d['Zaman Verimlilik Çarpanı']) / d['Kişi Sayısı']
+    d['Kişi Başı Puan'] = (d['Normalize_İş_100'] * d['Zaman Verimlilik Çarpanı'].clip(0.8, 1.2)) / d['Kişi Sayısı']
     
     return d[['Operatörler', 'Kişi Başı Puan', 'Tezgah', 'Departman', 'Sipariş No']]
 
@@ -441,12 +439,17 @@ df_op_all = pd.concat([op_k, op_h, op_m, op_e], ignore_index=True)
 
 tum_operatorler = sorted(list(df_op_all["Operatörler"].unique())) if not df_op_all.empty else []
 
-# --- SOL MENÜ (FİLTRELER) ---
+# --- SOL MENÜ (FİLTRELER VE ARAMA) ---
 st.sidebar.image("light-logo-zafer-lift.webp", use_container_width=True) 
 st.sidebar.markdown("## 🏭 Zafer Lift")
 st.sidebar.caption("Üretim Takip ve Veri Analitiği")
 
-st.sidebar.header("🔍 Fabrika Filtreleri")
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔍 Hızlı Makine Arama")
+arama_terimi = st.sidebar.text_input("Sipariş No veya Model Girin...", "").upper()
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Fabrika Filtreleri")
 st.sidebar.info("💡 'Tümü' seçiliyken ürün analizinde sadece Kaynak Atölyesi gösterilir. Özel birimleri incelemek için listeden seçin.")
 secilen_tezgah = st.sidebar.selectbox("İstasyon / Tezgah Seçin", ["Tümü"] + tum_tezgahlar)
 secilen_operator = st.sidebar.selectbox("Operatör Seçin", ["Tümü"] + tum_operatorler)
@@ -461,6 +464,7 @@ with tab1:
             df_k_filt = df_k.copy()
             if secilen_tezgah != "Tümü": df_k_filt = df_k_filt[df_k_filt["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_k_filt = df_k_filt[df_k_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            if arama_terimi: df_k_filt = df_k_filt[df_k_filt["Sipariş No"].astype(str).str.contains(arama_terimi, na=False) | df_k_filt["Model"].str.contains(arama_terimi, na=False)]
             
             # KPI KARTLARI (KAYNAK)
             toplam_adet = int(df_k_filt["Üretim Adedi"].sum())
@@ -480,6 +484,12 @@ with tab1:
 
             st.write("") 
             
+            # UYARI SİSTEMİ - GECİKEN İŞLER (KAYNAK)
+            gecikenler = df_k_filt[df_k_filt["Zaman Verimlilik Çarpanı"] <= 0.80]
+            if not gecikenler.empty:
+                geciken_siparisler = ", ".join(gecikenler["Sipariş No"].astype(str).unique())
+                st.warning(f"⚠️ **Gözetim Altındaki İşler (Gecikme Tespiti):** Atölye ortalamasına göre standart üretim hızının %20'den fazla gerisinde kalan siparişler: **{geciken_siparisler}**")
+
             # MODERN TABLO (KAYNAK)
             ozet_df = df_k_filt.groupby(["Model"]).agg({
                 "Zorluk Katsayısı": "mean", 
@@ -503,12 +513,17 @@ with tab1:
                 hide_index=True,
                 use_container_width=True
             )
+            
+            # EXCEL/CSV İNDİRME BUTONU (KAYNAK)
+            csv_kaynak = ozet_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(label="📥 Kaynak Tablosunu Excel/CSV Olarak İndir", data=csv_kaynak, file_name='kaynak_uretim_ozeti.csv', mime='text/csv')
     
     elif secilen_tezgah in tezgahlar_h:
         st.subheader("💧 Hidrolik Atölyesi Özeti (Saat Bazlı)")
         if not df_h.empty:
             df_h_filt = df_h[df_h["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_h_filt = df_h_filt[df_h_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            if arama_terimi: df_h_filt = df_h_filt[df_h_filt["Sipariş No"].astype(str).str.contains(arama_terimi, na=False)]
             
             toplam_adet = int(df_h_filt["Üretim Adedi"].sum())
             ort_sure = df_h_filt["Net Süre"].mean()
@@ -523,6 +538,11 @@ with tab1:
                 with st.container(border=True): st.metric("📑 Toplam Sipariş", f"{toplam_siparis} Adet")
             
             st.write("")
+            
+            gecikenler_h = df_h_filt[df_h_filt["Zaman Verimlilik Çarpanı"] <= 0.80]
+            if not gecikenler_h.empty:
+                gec_sip_h = ", ".join(gecikenler_h["Sipariş No"].astype(str).unique())
+                st.warning(f"⚠️ **Gözetim Altındaki İşler:** Hidrolik istasyonunda ortalama hızın çok gerisinde kalan siparişler: **{gec_sip_h}**")
             
             gosterim_h = df_h_filt[["Sipariş No", "Üretim Adedi", "Yağ Tankı(lt)", "Motor(kW)", "Ham_İş_Yükü", "Net Süre"]]
             max_adet_h = gosterim_h["Üretim Adedi"].max() if not gosterim_h.empty else 100
@@ -540,12 +560,16 @@ with tab1:
                 hide_index=True,
                 use_container_width=True
             )
+            
+            csv_hidrolik = gosterim_h.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(label="📥 Hidrolik Tablosunu Excel/CSV Olarak İndir", data=csv_hidrolik, file_name='hidrolik_uretim_ozeti.csv', mime='text/csv')
 
     elif secilen_tezgah in tezgahlar_m:
         st.subheader("🚚 Montaj Seferleri ve Özeti (Gün Bazlı)")
         if not df_m.empty:
             df_m_filt = df_m[df_m["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_m_filt = df_m_filt[df_m_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            if arama_terimi: df_m_filt = df_m_filt[df_m_filt["Sipariş No"].astype(str).str.contains(arama_terimi, na=False) | df_m_filt["Model"].str.contains(arama_terimi, na=False)]
             
             toplam_sefer = df_m_filt["Sipariş No"].nunique()
             ort_mesafe = df_m_filt["Mesafe (km)"].mean()
@@ -560,6 +584,11 @@ with tab1:
                 with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} İş Günü" if pd.notna(ort_sure) else "0 İş Günü")
 
             st.write("")
+            
+            gecikenler_m = df_m_filt[df_m_filt["Zaman Verimlilik Çarpanı"] <= 0.80]
+            if not gecikenler_m.empty:
+                gec_sip_m = ", ".join(gecikenler_m["Sipariş No"].astype(str).unique())
+                st.warning(f"⚠️ **Gözetim Altındaki Seferler:** Montajı beklenenden belirgin derecede uzun süren siparişler: **{gec_sip_m}**")
             
             gosterim_df = df_m_filt[["Sipariş No", "Model", "Montaj Yeri", "Mesafe (km)", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı", "Ham_İş_Yükü", "Net Üretim Süresi (Gün)"]]
             max_mesafe = gosterim_df["Mesafe (km)"].max() if not gosterim_df.empty else 1000
@@ -579,12 +608,16 @@ with tab1:
                 hide_index=True,
                 use_container_width=True
             )
+            
+            csv_montaj = gosterim_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(label="📥 Montaj Tablosunu Excel/CSV Olarak İndir", data=csv_montaj, file_name='montaj_ozeti.csv', mime='text/csv')
 
     elif secilen_tezgah in tezgahlar_e:
         st.subheader("⚡ Elektrik Atölyesi Özeti (Saat Bazlı)")
         if not df_e.empty:
             df_e_filt = df_e[df_e["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_e_filt = df_e_filt[df_e_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
+            if arama_terimi: df_e_filt = df_e_filt[df_e_filt["Sipariş No"].astype(str).str.contains(arama_terimi, na=False) | df_e_filt["Model"].str.contains(arama_terimi, na=False)]
             
             toplam_is = df_e_filt["Sipariş No"].nunique()
             ort_sure = df_e_filt["Net Süre"].mean()
@@ -599,6 +632,11 @@ with tab1:
                 with st.container(border=True): st.metric("🔌 PLC'li İş Oranı", f"%{plc_oran:.0f}" if pd.notna(plc_oran) else "%0")
 
             st.write("")
+            
+            gecikenler_e = df_e_filt[df_e_filt["Zaman Verimlilik Çarpanı"] <= 0.80]
+            if not gecikenler_e.empty:
+                gec_sip_e = ", ".join(gecikenler_e["Sipariş No"].astype(str).unique())
+                st.warning(f"⚠️ **Gözetim Altındaki İşler:** Elektrik süreci uzayan veya yavaş ilerleyen siparişler: **{gec_sip_e}**")
             
             gosterim_e = df_e_filt[["Sipariş No", "Model", "Durak Sayısı", "PLC", "PLC Model", "Ham_İş_Yükü", "Net Süre"]]
             max_durak = gosterim_e["Durak Sayısı"].max() if not gosterim_e.empty else 10
@@ -617,6 +655,9 @@ with tab1:
                 hide_index=True,
                 use_container_width=True
             )
+            
+            csv_elektrik = gosterim_e.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(label="📥 Elektrik Tablosunu Excel/CSV Olarak İndir", data=csv_elektrik, file_name='elektrik_uretim_ozeti.csv', mime='text/csv')
 
 with tab2:
     st.subheader("🏆 Fabrika Geneli Operatör Performans Sıralaması")
@@ -645,6 +686,9 @@ with tab2:
             hide_index=True,
             use_container_width=True
         )
+        
+        csv_op = final_op_tablosu.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(label="📥 Performans Tablosunu İndir", data=csv_op, file_name='operator_performans_ozeti.csv', mime='text/csv')
     else:
         st.info("Gösterilecek operatör verisi bulunamadı.")
 
