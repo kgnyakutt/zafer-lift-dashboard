@@ -142,8 +142,21 @@ def veri_isle_kaynak():
     df["Ebat_G"] = df["Platform Ebat (m2)"].apply(metrekare_ayikla).replace(0, 1.0)
     df["Teknik Puan"] = pd.to_numeric(df["Teknik Puan"], errors='coerce').fillna(1.0)
     
-    df["Toplam Süre (Gün)"] = (pd.to_datetime(df["Bitiş"], dayfirst=True, errors='coerce') - pd.to_datetime(df["Başlangıç"], dayfirst=True, errors='coerce')).dt.days
+    # --- YENİ: SADECE İŞ GÜNLERİNİ (HAFTA SONU HARİÇ) HESAPLAMA ---
+    dt_bas = pd.to_datetime(df["Başlangıç"], dayfirst=True, errors='coerce')
+    dt_bit = pd.to_datetime(df["Bitiş"], dayfirst=True, errors='coerce')
+    
+    def is_gunu_hesapla(b, bit):
+        if pd.isna(b) or pd.isna(bit): return np.nan
+        try:
+            return float(np.busday_count(b.date(), bit.date()))
+        except:
+            return np.nan
+            
+    df["Toplam Süre (Gün)"] = [is_gunu_hesapla(b, bit) for b, bit in zip(dt_bas, dt_bit)]
+    
     df["Bekleme Süresi (Gün)"] = pd.to_numeric(df["Bekleme Süresi (Gün)"], errors='coerce').fillna(0.0)
+    # Aynı gün biten işler 0 kalmasın diye minimum süreyi 1.0 gün olarak ayarlıyoruz.
     df["Net Üretim Süresi (Gün)"] = (df["Toplam Süre (Gün)"] - df["Bekleme Süresi (Gün)"]).apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
 
     min_kap, max_kap = df["Kapasite_G"].min(), df["Kapasite_G"].max()
@@ -272,7 +285,20 @@ def veri_isle_montaj():
         return 1.0 
 
     df_m["Ortam_Montaj_Çarpanı"] = df_m.apply(ortam_montaj_carpani, axis=1)
-    df_m["Toplam Süre (Gün)"] = (pd.to_datetime(df_m.get("Bitiş"), dayfirst=True, errors='coerce') - pd.to_datetime(df_m.get("Başlangıç"), dayfirst=True, errors='coerce')).dt.days
+    
+    # --- YENİ: MONTAJ İÇİN SADECE İŞ GÜNLERİNİ HESAPLAMA ---
+    dt_bas_m = pd.to_datetime(df_m.get("Başlangıç"), dayfirst=True, errors='coerce')
+    dt_bit_m = pd.to_datetime(df_m.get("Bitiş"), dayfirst=True, errors='coerce')
+    
+    def is_gunu_hesapla_m(b, bit):
+        if pd.isna(b) or pd.isna(bit): return np.nan
+        try:
+            return float(np.busday_count(b.date(), bit.date()))
+        except:
+            return np.nan
+            
+    df_m["Toplam Süre (Gün)"] = [is_gunu_hesapla_m(b, bit) for b, bit in zip(dt_bas_m, dt_bit_m)]
+    
     df_m["Net Üretim Süresi (Gün)"] = df_m["Toplam Süre (Gün)"].apply(lambda x: max(x, 1.0) if pd.notna(x) else 1.0)
 
     df_m["Ham_İş_Yükü"] = df_m["Zorluk Katsayısı"] * df_m["Normalize_Kapasite"] * df_m["Normalize_Ebat"] * df_m["Tabla_Carpani"] * df_m["Kilitleme_Carpani"] * df_m["Uzunluk_Carpani"] * df_m["Normalize_Mesafe"] * df_m["Ortam_Montaj_Çarpanı"] * df_m["Üretim Adedi"]
@@ -446,13 +472,13 @@ with tab1:
             with m_col1:
                 with st.container(border=True): st.metric("📦 Toplam Üretim", f"{toplam_adet} Adet")
             with m_col2:
-                with st.container(border=True): st.metric("⏱️ Ort. Üretim Süresi", f"{ort_sure:.1f} Gün" if pd.notna(ort_sure) else "0 Gün")
+                with st.container(border=True): st.metric("⏱️ Ort. Üretim Süresi", f"{ort_sure:.1f} İş Günü" if pd.notna(ort_sure) else "0 İş Günü")
             with m_col3:
                 with st.container(border=True): st.metric("📑 Toplam Sipariş", f"{toplam_siparis} Adet")
             with m_col4:
                 with st.container(border=True): st.metric("🏷️ Model Çeşidi", f"{model_cesidi} Model")
 
-            st.write("") # Boşluk
+            st.write("") 
             
             # MODERN TABLO (KAYNAK)
             ozet_df = df_k_filt.groupby(["Model"]).agg({
@@ -471,7 +497,7 @@ with tab1:
                     "Model": st.column_config.TextColumn("Ürün Modeli", width="medium"),
                     "Zorluk Katsayısı": st.column_config.NumberColumn("Zorluk Kats.", format="%.1f"),
                     "Üretim Adedi": st.column_config.ProgressColumn("Toplam Üretim (Adet)", format="%d", min_value=0, max_value=int(max_adet)),
-                    "Net Üretim Süresi (Gün)": st.column_config.NumberColumn("Ort. Süre", format="%.1f Gün"),
+                    "Net Üretim Süresi (Gün)": st.column_config.NumberColumn("Ort. Süre", format="%.1f İş Günü"),
                     "Sipariş Adedi": st.column_config.NumberColumn("Sipariş Sayısı", format="%d")
                 },
                 hide_index=True,
@@ -484,7 +510,6 @@ with tab1:
             df_h_filt = df_h[df_h["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_h_filt = df_h_filt[df_h_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
             
-            # KPI KARTLARI (HİDROLİK)
             toplam_adet = int(df_h_filt["Üretim Adedi"].sum())
             ort_sure = df_h_filt["Net Süre"].mean()
             toplam_siparis = df_h_filt["Sipariş No"].nunique()
@@ -499,7 +524,6 @@ with tab1:
             
             st.write("")
             
-            # MODERN TABLO (HİDROLİK)
             gosterim_h = df_h_filt[["Sipariş No", "Üretim Adedi", "Yağ Tankı(lt)", "Motor(kW)", "Ham_İş_Yükü", "Net Süre"]]
             max_adet_h = gosterim_h["Üretim Adedi"].max() if not gosterim_h.empty else 100
             
@@ -523,7 +547,6 @@ with tab1:
             df_m_filt = df_m[df_m["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_m_filt = df_m_filt[df_m_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
             
-            # KPI KARTLARI (MONTAJ)
             toplam_sefer = df_m_filt["Sipariş No"].nunique()
             ort_mesafe = df_m_filt["Mesafe (km)"].mean()
             ort_sure = df_m_filt["Net Üretim Süresi (Gün)"].mean()
@@ -534,11 +557,10 @@ with tab1:
             with m_col2: 
                 with st.container(border=True): st.metric("📍 Ort. Mesafe", f"{ort_mesafe:.1f} km" if pd.notna(ort_mesafe) else "0 km")
             with m_col3: 
-                with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} Gün" if pd.notna(ort_sure) else "0 Gün")
+                with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} İş Günü" if pd.notna(ort_sure) else "0 İş Günü")
 
             st.write("")
             
-            # MODERN TABLO (MONTAJ)
             gosterim_df = df_m_filt[["Sipariş No", "Model", "Montaj Yeri", "Mesafe (km)", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı", "Ham_İş_Yükü", "Net Üretim Süresi (Gün)"]]
             max_mesafe = gosterim_df["Mesafe (km)"].max() if not gosterim_df.empty else 1000
             
@@ -552,7 +574,7 @@ with tab1:
                     "Normalize_Mesafe": st.column_config.NumberColumn("Mesafe Çarpanı", format="%.2f"),
                     "Ortam_Montaj_Çarpanı": st.column_config.NumberColumn("Ortam Çarpanı", format="%.2f"),
                     "Ham_İş_Yükü": st.column_config.NumberColumn("İş Yükü Puanı", format="%.2f"),
-                    "Net Üretim Süresi (Gün)": st.column_config.NumberColumn("Net Süre", format="%.1f Gün")
+                    "Net Üretim Süresi (Gün)": st.column_config.NumberColumn("Net Süre", format="%.1f İş Günü")
                 },
                 hide_index=True,
                 use_container_width=True
@@ -564,7 +586,6 @@ with tab1:
             df_e_filt = df_e[df_e["Tezgah"] == secilen_tezgah]
             if secilen_operator != "Tümü": df_e_filt = df_e_filt[df_e_filt["Operatörler"].fillna("").str.contains(secilen_operator, na=False)]
             
-            # KPI KARTLARI (ELEKTRİK)
             toplam_is = df_e_filt["Sipariş No"].nunique()
             ort_sure = df_e_filt["Net Süre"].mean()
             plc_oran = (df_e_filt["PLC"].astype(float) > 0).mean() * 100 if "PLC" in df_e_filt.columns else 0
@@ -579,7 +600,6 @@ with tab1:
 
             st.write("")
             
-            # MODERN TABLO (ELEKTRİK)
             gosterim_e = df_e_filt[["Sipariş No", "Model", "Durak Sayısı", "PLC", "PLC Model", "Ham_İş_Yükü", "Net Süre"]]
             max_durak = gosterim_e["Durak Sayısı"].max() if not gosterim_e.empty else 10
             
@@ -612,7 +632,6 @@ with tab2:
         
         final_op_tablosu.rename(columns={"Sipariş No": "Tamamlanan İş", "Kişi Başı Puan": "Performans Skoru (100 Üzerinden)"}, inplace=True)
         
-        # OPERATÖR PERFORMANS TABLOSUNU DA MODERNLEŞTİRELİM
         max_skor = final_op_tablosu["Performans Skoru (100 Üzerinden)"].max() if not final_op_tablosu.empty else 100
         
         st.dataframe(
@@ -651,9 +670,9 @@ with tab3:
             if st.button("🚀 Tahmin Et (Kaynak)"):
                 t_carp = 1.1 if in_k_tabla == 1 else 1.0
                 k_carp = 1.2 if in_k_kilit == 1 else 1.0
-                u_carp = 1.0 # Basit arayüz için standart bırakıldı (asansör seçilirse dinamikleşebilir)
+                u_carp = 1.0 
                 ham_veri = np.array([[2.5, 1.2, 1.1, 1.0 + (in_k_teknik/10), in_k_celik+1.0, t_carp, k_carp, u_carp, in_k_kisi]]) 
-                st.success(f"🎯 Tahmini Süre: **{max(rf_net.predict(sc.transform(ham_veri))[0], 1.0):.1f} Gün**")
+                st.success(f"🎯 Tahmini Süre: **{max(rf_net.predict(sc.transform(ham_veri))[0], 1.0):.1f} İş Günü**")
         else: st.warning("Yeterli veri yok.")
 
     elif yz_departman == "Hidrolik Ünitesi" and not df_h.empty:
@@ -687,7 +706,7 @@ with tab3:
             if st.button("🚀 Tahmin Et (Montaj)"):
                 mesafe = mesafe_hesapla_api(in_m_hedef)
                 o_carp = 1.0 if "Dış" in in_m_ortam else (2.0 if "Vinç" in in_m_durum else 4.0)
-                st.success(f"📍 {in_m_hedef} ({mesafe:.1f} km) için Tahmini Süre: **{max(rf_net.predict(sc.transform(np.array([[1.5, 1.2, 1.2, 1.0, 1.0, 1.0, 1.2, o_carp, in_m_kisi]])))[0], 0.5):.1f} Gün**")
+                st.success(f"📍 {in_m_hedef} ({mesafe:.1f} km) için Tahmini Süre: **{max(rf_net.predict(sc.transform(np.array([[1.5, 1.2, 1.2, 1.0, 1.0, 1.0, 1.2, o_carp, in_m_kisi]])))[0], 0.5):.1f} İş Günü**")
         else: st.warning("Yeterli veri yok.")
 
     elif yz_departman == "Elektrik Atölyesi" and not df_e.empty:
@@ -710,9 +729,8 @@ with tab3:
 
     elif yz_departman == "🚀 Makine Sevk Süresi (Kaynak + Elektrik)":
         if not df_k.empty and not df_e.empty:
-            st.info("💡 **Bilgi:** Bu tahminleme modeli, önce Kaynak/İmalat yapay zekasını çalıştırır, ardından Elektrik montaj süresini hesaplar. Elektrik saatini mesai gününe (8 saat) çevirip toplam sevke çıkma süresini verir.")
+            st.info("💡 **Bilgi:** Bu tahminleme modeli, önce Kaynak/İmalat yapay zekasını çalıştırır, ardından Elektrik montaj süresini hesaplar. Elektrik saatini mesai gününe (8 saat) çevirip toplam sevke çıkma süresini (iş günü bazında) verir.")
             
-            # İki modeli de aynı anda eğitiyoruz
             X_k = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Teknik", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani", "Uzunluk_Carpani", "Kişi Sayısı"]
             rf_net_k, _, sc_k, _, _ = yapay_zeka_egit(df_k, X_k, birim="gun")
             
@@ -745,22 +763,18 @@ with tab3:
                     in_s_kisi_e = st.number_input("Elektrik Ekibi Kişi Sayısı", min_value=1, value=1, key="s_kisi_e")
                 
                 if st.button("🚀 Toplam Sevk Süresini Hesapla", use_container_width=True):
-                    # Kaynak Çarpanları
                     t_carp = 1.1 if in_s_tabla == 1 else 1.0
                     k_carp = 1.2 if in_s_kilit == 1 else 1.0
                     u_carp = 1.0 
                     
-                    # Kaynak Yapay Zeka Tahmini
                     ham_veri_k = np.array([[2.5, 1.2, 1.1, 1.0 + (in_s_teknik/10), in_s_celik+1.0, t_carp, k_carp, u_carp, in_s_kisi_k]]) 
                     tahmin_kaynak_gun = max(rf_net_k.predict(sc_k.transform(ham_veri_k))[0], 1.0)
                     
-                    # Elektrik Yapay Zeka Tahmini
                     p_carp = 1.2 if in_s_plc == 1 else 1.0
                     m_carp = 1.1 if in_s_plc == 1 else 1.0
                     ham_veri_e = np.array([[1.5, 1.2, 1.2, 1.0, 1.1, k_carp, 1.0, t_carp, 1.0, 1.0, 1.0, p_carp, m_carp, in_s_kisi_e]])
                     tahmin_elektrik_saat = max(rf_net_e.predict(sc_e.transform(ham_veri_e))[0], 0.5)
                     
-                    # Saat -> Gün dönüşümü (Ortalama bir gün 8 saat mesai sayılmıştır)
                     elektrik_gun_karsiligi = tahmin_elektrik_saat / 8.0
                     toplam_sevk_gun = tahmin_kaynak_gun + elektrik_gun_karsiligi
                     
@@ -768,11 +782,11 @@ with tab3:
                     
                     r_col1, r_col2, r_col3 = st.columns(3)
                     with r_col1:
-                        st.info(f"🛠️ **Kaynak İmalatı:**\n\n### {tahmin_kaynak_gun:.1f} Gün")
+                        st.info(f"🛠️ **Kaynak İmalatı:**\n\n### {tahmin_kaynak_gun:.1f} İş Günü")
                     with r_col2:
-                        st.info(f"⚡ **Elektrik İşlemi:**\n\n### {tahmin_elektrik_saat:.1f} Saat\n*(~{elektrik_gun_karsiligi:.1f} Gün)*")
+                        st.info(f"⚡ **Elektrik İşlemi:**\n\n### {tahmin_elektrik_saat:.1f} Saat\n*(~{elektrik_gun_karsiligi:.1f} İş Günü)*")
                     with r_col3:
-                        st.error(f"🚀 **TOPLAM SEVK SÜRESİ:**\n\n### {toplam_sevk_gun:.1f} Gün")
+                        st.error(f"🚀 **TOPLAM SEVK SÜRESİ:**\n\n### {toplam_sevk_gun:.1f} İş Günü")
                         
             else:
                 st.warning("Yapay Zeka modellerini eğitmek için yeterli veri yok.")
