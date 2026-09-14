@@ -285,9 +285,9 @@ def veri_isle_montaj():
     def ortam_montaj_carpani(row):
         ortam = str(row.get("Ortam", "")).strip().lower()
         durum = str(row.get("Montaj durumu", "")).strip().lower()
-        if "1" in ortam or "iç" in ortam or "ic" in ortam:
-            if "vinç" in durum or "vinc" in durum: return 2.0
-            elif "manuel" in durum or "el" in durum: return 4.0
+        if "1" in ortam or "İç" in ortam or "ic" in ortam:
+            if "Vinç" in durum or "vinc" in durum: return 2.0
+            elif "Manuel" in durum or "el" in durum: return 4.0
             return 2.0 
         return 1.0 
 
