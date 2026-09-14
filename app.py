@@ -41,12 +41,13 @@ ZORLUK_HARITASI = {
     "EYP2": 1.0, "EYP3": 1.0, "EYP1": 1.0, "EAP2": 1.0, "EYP1U": 1.0,
     "EYP4": 1.0, "EYP1S12": 1.0, "EYP1S11": 1.0, "EAP1": 1.0, "EYP1T": 1.0,
     "EEP3": 1.0, "EYP1H": 1.0, "EYP1A": 1.0, "EEP2": 1.0, "EEP1": 1.0,
-    "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0
+    "PYM157ÖZEL": 1.0, "HYM2T": 1.0, "HYM4": 1.0, "EYP2H": 1.0, 
+    "EAP3": 1.0 
 }
 MAKSIMUM_CARPAN_KAPASITE = 2.0   
 MAKSIMUM_CARPAN_M2 = 1.3       
 MAKSIMUM_CARPAN_TEKNIK = 1.5   
-MAKASLI_KODLAR = ["EYP1Ç", "EYP2", "EYP3", "EYP1", "EAP2", "EYP1U", "EYP4", "EYP1S12", "EYP1S11", "EAP1", "EYP1T", "EEP3", "EYP1H", "EYP1A", "EEP2", "EEP1", "PYM157ÖZEL", "EYP2H", "HR"]
+MAKASLI_KODLAR = ["EYP1Ç", "EYP2", "EYP3", "EYP1", "EAP2", "EYP1U", "EYP4", "EYP1S12", "EYP1S11", "EAP1", "EYP1T", "EEP3", "EYP1H", "EYP1A", "EEP2", "EEP1", "PYM157ÖZEL", "EYP2H", "HR", "EAP3"] # EAP3 makaslı listesine eklendi
 
 def urun_makasli_mi(urun):
     urun_str = str(urun).upper().replace("İ", "I").replace("ı", "I")
