@@ -171,7 +171,7 @@ def veri_isle_kaynak():
     df["Günlük_Hız"] = df["Ham_İş_Yükü"] / df["Net Üretim Süresi (Gün)"]
     medyan_hiz = df["Günlük_Hız"].median()
     
-    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.50, upper=1.50) # Alt sınırı alarm tespiti için genişlettik
+    df["Zaman Verimlilik Çarpanı"] = (df["Günlük_Hız"] / (medyan_hiz if pd.notna(medyan_hiz) and medyan_hiz != 0 else 1.0)).clip(lower=0.50, upper=1.50) 
     
     df['Operatörler'] = df['Operatörler'].fillna('').astype(str)
     df['Kişi Sayısı'] = df['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
@@ -417,7 +417,6 @@ def get_op_points(df):
     
     max_is_yuku = d['Ham_İş_Yükü'].max()
     if max_is_yuku > 0:
-        # Zaman Verimlilik Çarpanı'nı burada 0.8 ile 1.2 arasına sıkıştırarak puanı hesaplıyoruz
         d['Normalize_İş_100'] = (d['Ham_İş_Yükü'] / max_is_yuku) * 100.0
     else:
         d['Normalize_İş_100'] = 0.0
@@ -514,9 +513,9 @@ with tab1:
                 use_container_width=True
             )
             
-            # EXCEL/CSV İNDİRME BUTONU (KAYNAK)
-            csv_kaynak = ozet_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 Kaynak Tablosunu Excel/CSV Olarak İndir", data=csv_kaynak, file_name='kaynak_uretim_ozeti.csv', mime='text/csv')
+            # EXCEL/CSV İNDİRME BUTONU (KAYNAK) - sep=';' Eklendi
+            csv_kaynak = ozet_df.to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button(label="📥 Kaynak Tablosunu Excel Olarak İndir", data=csv_kaynak, file_name='kaynak_uretim_ozeti.csv', mime='text/csv')
     
     elif secilen_tezgah in tezgahlar_h:
         st.subheader("💧 Hidrolik Atölyesi Özeti (Saat Bazlı)")
@@ -561,8 +560,9 @@ with tab1:
                 use_container_width=True
             )
             
-            csv_hidrolik = gosterim_h.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 Hidrolik Tablosunu Excel/CSV Olarak İndir", data=csv_hidrolik, file_name='hidrolik_uretim_ozeti.csv', mime='text/csv')
+            # EXCEL/CSV İNDİRME BUTONU (HİDROLİK) - sep=';' Eklendi
+            csv_hidrolik = gosterim_h.to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button(label="📥 Hidrolik Tablosunu Excel Olarak İndir", data=csv_hidrolik, file_name='hidrolik_uretim_ozeti.csv', mime='text/csv')
 
     elif secilen_tezgah in tezgahlar_m:
         st.subheader("🚚 Montaj Seferleri ve Özeti (Gün Bazlı)")
@@ -609,8 +609,9 @@ with tab1:
                 use_container_width=True
             )
             
-            csv_montaj = gosterim_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 Montaj Tablosunu Excel/CSV Olarak İndir", data=csv_montaj, file_name='montaj_ozeti.csv', mime='text/csv')
+            # EXCEL/CSV İNDİRME BUTONU (MONTAJ) - sep=';' Eklendi
+            csv_montaj = gosterim_df.to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button(label="📥 Montaj Tablosunu Excel Olarak İndir", data=csv_montaj, file_name='montaj_ozeti.csv', mime='text/csv')
 
     elif secilen_tezgah in tezgahlar_e:
         st.subheader("⚡ Elektrik Atölyesi Özeti (Saat Bazlı)")
@@ -656,8 +657,9 @@ with tab1:
                 use_container_width=True
             )
             
-            csv_elektrik = gosterim_e.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 Elektrik Tablosunu Excel/CSV Olarak İndir", data=csv_elektrik, file_name='elektrik_uretim_ozeti.csv', mime='text/csv')
+            # EXCEL/CSV İNDİRME BUTONU (ELEKTRİK) - sep=';' Eklendi
+            csv_elektrik = gosterim_e.to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button(label="📥 Elektrik Tablosunu Excel Olarak İndir", data=csv_elektrik, file_name='elektrik_uretim_ozeti.csv', mime='text/csv')
 
 with tab2:
     st.subheader("🏆 Fabrika Geneli Operatör Performans Sıralaması")
@@ -687,8 +689,9 @@ with tab2:
             use_container_width=True
         )
         
-        csv_op = final_op_tablosu.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(label="📥 Performans Tablosunu İndir", data=csv_op, file_name='operator_performans_ozeti.csv', mime='text/csv')
+        # EXCEL/CSV İNDİRME BUTONU (OPERATÖR PERFORMANS) - sep=';' Eklendi
+        csv_op = final_op_tablosu.to_csv(index=False, sep=';').encode('utf-8-sig')
+        st.download_button(label="📥 Performans Tablosunu Excel Olarak İndir", data=csv_op, file_name='operator_performans_ozeti.csv', mime='text/csv')
     else:
         st.info("Gösterilecek operatör verisi bulunamadı.")
 
