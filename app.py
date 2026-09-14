@@ -66,11 +66,11 @@ def urun_makasli_mi(urun):
     if "MAKASLI" in urun_str: return True
     return any(kod in urun_str for kod in MAKASLI_KODLAR)
 
-# VAR/YOK ve 1/0 Dönüştürücü Fonksiyon (Sihirli Çözüm)
+# PYTHON TÜRKÇE KARAKTER ZIRHI (.upper() kullanılarak)
 def parse_var_yok(val):
     if pd.isna(val): return 0.0
-    s = str(val).strip().lower()
-    if s in ['var', '1', '1.0', 'evet', 'true', 'dijital']: return 1.0
+    s = str(val).strip().upper().replace("İ", "I")
+    if s in ['VAR', '1', '1.0', 'EVET', 'TRUE', 'DIJITAL']: return 1.0
     return 0.0
 
 # ==========================================
@@ -84,7 +84,6 @@ def veri_isle_kaynak():
     if df.empty: return df
     
     df.columns = df.columns.str.strip()
-    # Sütun adlarını kodun anlayacağı standartlara zorla çeviriyoruz
     df.rename(columns={"Bekleme (Gün)": "Bekleme Süresi (Gün)", "Kitleme": "Kilitleme"}, inplace=True)
     
     def urun_normalize(deger):
@@ -131,12 +130,8 @@ def veri_isle_kaynak():
     celik_val = pd.to_numeric(df["Çelik Durumu (1/0)"], errors='coerce').fillna(0.0)
     df["Çelik Çarpanı"] = celik_val + 1.0
     
-    # Var/Yok metinlerini sayılara çevirme (Kaynak)
-    val_tabla = df["Tabla Kapısı"].apply(parse_var_yok)
-    df["Tabla_Carpani"] = np.where(val_tabla > 0, 1.1, 1.0)
-    
-    val_kilit = df["Kilitleme"].apply(parse_var_yok)
-    df["Kilitleme_Carpani"] = np.where(val_kilit > 0, 1.2, 1.0)
+    df["Tabla_Carpani"] = np.where(df["Tabla Kapısı"].apply(parse_var_yok) > 0, 1.1, 1.0)
+    df["Kilitleme_Carpani"] = np.where(df["Kilitleme"].apply(parse_var_yok) > 0, 1.2, 1.0)
 
     def uzunluk_hesapla(row):
         if urun_makasli_mi(row["Model"]): return 1.0 
@@ -252,7 +247,6 @@ def mesafe_hesapla_api(hedef_sehir):
             except:
                 kus_ucusu = geodesic((lat1, lon1), (lat2, lon2)).km
                 return kus_ucusu * 1.28 
-                
     except: pass
     return 50.0 
 
@@ -264,14 +258,7 @@ def veri_isle_montaj():
     if df_m.empty: return df_m
 
     df_m.columns = df_m.columns.str.strip()
-    
-    # Sütun adı farklılıklarını kodla eşitliyoruz
-    duzeltmeler = {
-        "Montaj Durumu": "Montaj durumu", 
-        "montaj durumu": "Montaj durumu",
-        "ORTAM": "Ortam", 
-        "ortam": "Ortam"
-    }
+    duzeltmeler = {"Montaj Durumu": "Montaj durumu", "montaj durumu": "Montaj durumu", "ORTAM": "Ortam", "ortam": "Ortam"}
     df_m.rename(columns=duzeltmeler, inplace=True)
 
     hedef_sutunlar_m = ["Sipariş No", "Başlangıç", "Bitiş", "Tezgah", "Operatörler", "Üretim Adedi", "Montaj Yeri", "Model", "Ortam", "Montaj durumu"]
@@ -301,14 +288,14 @@ def veri_isle_montaj():
     min_km, max_km = df_m["Mesafe (km)"].min(), df_m["Mesafe (km)"].max()
     df_m["Normalize_Mesafe"] = 1.0 if max_km == min_km else 1.0 + ((df_m["Mesafe (km)"] - min_km) / (max_km - min_km)) * 1.5
 
-    # İç, Dış, Vinç, Manuel vb. kelimelerdeki Türkçe karakterleri %100 çözen yapı
+    # İŞTE BURASI: TÜRKÇE KARAKTER ZIRHLI ORTAM ÇARPAN HESAPLAMASI
     def ortam_montaj_carpani(row):
-        ortam = str(row.get("Ortam", "")).strip().lower().replace("ı", "i").replace("ç", "c").replace("ş", "s")
-        durum = str(row.get("Montaj durumu", "")).strip().lower().replace("ı", "i").replace("ç", "c").replace("ş", "s")
+        ortam = str(row.get("Ortam", "")).strip().upper().replace("İ", "I").replace("Ç", "C")
+        durum = str(row.get("Montaj durumu", "")).strip().upper().replace("İ", "I").replace("Ç", "C")
         
-        if "ic" in ortam or "1" in ortam:
-            if "vinc" in durum: return 2.0
-            elif "manuel" in durum or "el" in durum: return 4.0
+        if "IC" in ortam or "1" in ortam:
+            if "VINC" in durum: return 2.0
+            elif "MANUEL" in durum or "EL" in durum: return 4.0
             return 2.0 
         return 1.0 
 
@@ -345,7 +332,7 @@ def veri_isle_elektrik():
     if df_e.empty: return df_e
 
     df_e.columns = df_e.columns.str.strip()
-    df_e.rename(columns={"Kitleme": "Kilitleme"}, inplace=True) # Tablodaki "Kitleme" ismini "Kilitleme" olarak düzeltiyoruz
+    df_e.rename(columns={"Kitleme": "Kilitleme"}, inplace=True) 
     
     hedef_sutunlar_e = ["Sipariş No", "Süre(Saat)", "Tezgah", "Operatörler", "Üretim Adedi", "Model", "Durak Sayısı", "Kilitleme", "PLC", "PLC Model", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "Buton Tipi", "İkaz Lambaları"]
     for col in hedef_sutunlar_e:
@@ -371,15 +358,13 @@ def veri_isle_elektrik():
     min_d, max_d = durak_vals.min(), durak_vals.max()
     df_e["Normalize_Durak"] = 1.0 if max_d == min_d else 1.0 + ((durak_vals - min_d) / (max_d - min_d)) * 0.5
 
-    # Elektrik "var"/"yok" metinlerini matematiksel değerlere dönüştürme
     parametre_listesi = ["Kilitleme", "Sıfırlama", "Tabla Kapısı", "Yavaşlama", "İkaz Lambaları", "PLC", "Buton Tipi"]
     for p in parametre_listesi:
-        val = df_e[p].apply(parse_var_yok)
-        df_e[f"{p}_Carpani"] = np.where(val > 0, 1.2, 1.0)
+        df_e[f"{p}_Carpani"] = np.where(df_e[p].apply(parse_var_yok) > 0, 1.2, 1.0)
 
     def plc_model_carpani(row):
-        model = str(row.get("PLC Model", "")).strip().lower()
-        if any(m in model for m in ["gemo", "delta", "omron", "schneider", "siemens"]): return 1.1
+        model = str(row.get("PLC Model", "")).strip().upper()
+        if any(m in model for m in ["GEMO", "DELTA", "OMRON", "SCHNEIDER", "SIEMENS"]): return 1.1
         return 1.1
 
     df_e["PLC_Model_Carpani"] = df_e.apply(plc_model_carpani, axis=1)
@@ -400,7 +385,7 @@ def veri_isle_elektrik():
     df_e['Kişi Sayısı'] = df_e['Operatörler'].apply(lambda x: len([op for op in x.split(',') if op.strip()]) if x else 1).replace(0, 1)
     return df_e
 
-# --- YZ MODELİ (ADAM-GÜN YAKLAŞIMI İLE DÜZELTİLDİ) ---
+# --- YZ MODELİ (ADAM-GÜN) ---
 @st.cache_resource
 def yapay_zeka_egit(df_model, X_cols, birim="gun"):
     hedef_sutun = "Net Süre" if birim == "saat" else "Net Üretim Süresi (Gün)"
@@ -627,9 +612,7 @@ with tab1:
             
             toplam_is = df_e_filt["Sipariş No"].nunique()
             ort_sure = df_e_filt["Net Süre"].mean()
-            
-            # Hatasız PLC Oranı Hesaplama (var = 1, yok = 0)
-            plc_oran_val = df_e_filt["PLC"].apply(parse_var_yok).mean() * 100 if "PLC" in df_e_filt.columns else 0
+            plc_oran = df_e_filt["PLC"].apply(parse_var_yok).mean() * 100 if "PLC" in df_e_filt.columns else 0
             
             m_col1, m_col2, m_col3 = st.columns(3)
             with m_col1: 
@@ -637,7 +620,7 @@ with tab1:
             with m_col2: 
                 with st.container(border=True): st.metric("⏱️ Ort. Süre", f"{ort_sure:.1f} Saat" if pd.notna(ort_sure) else "0 Saat")
             with m_col3: 
-                with st.container(border=True): st.metric("🔌 PLC'li İş Oranı", f"%{plc_oran_val:.0f}" if pd.notna(plc_oran_val) else "%0")
+                with st.container(border=True): st.metric("🔌 PLC'li İş Oranı", f"%{plc_oran:.0f}" if pd.notna(plc_oran) else "%0")
 
             st.write("")
             
@@ -700,7 +683,7 @@ with tab3:
     yz_departman = st.radio("Hangi atölye için tahmin yapmak istiyorsunuz?", ["Kaynak İmalatı", "Hidrolik Ünitesi", "Montaj Seferi", "Elektrik Atölyesi", "🚀 Makine Sevk Süresi (Kaynak + Elektrik)"], horizontal=True)
     
     if yz_departman == "Kaynak İmalatı" and not df_k.empty:
-        X_k = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Teknik", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani", "Uzunluk_Carpani", "Kişi Sayısı"]
+        X_k = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Teknik", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani", "Uzunluk_Carpani"]
         rf_net, _, sc, _, metrik_k = yapay_zeka_egit(df_k, X_k, birim="gun")
         if rf_net:
             col1, col2 = st.columns(2)
@@ -726,7 +709,7 @@ with tab3:
         else: st.warning("Yeterli veri yok.")
 
     elif yz_departman == "Hidrolik Ünitesi" and not df_h.empty:
-        X_h = ["Normalize_Tank", "Normalize_Motor", "Üretim Adedi", "Kişi Sayısı"]
+        X_h = ["Normalize_Tank", "Normalize_Motor", "Üretim Adedi"]
         rf_net, _, sc, _, metrik_h = yapay_zeka_egit(df_h, X_h, birim="saat")
         if rf_net:
             col1, col2 = st.columns(2)
@@ -747,7 +730,7 @@ with tab3:
         else: st.warning("Yeterli veri yok.")
 
     elif yz_departman == "Montaj Seferi" and not df_m.empty:
-        X_m = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Tabla_Carpani", "Kilitleme_Carpani", "Uzunluk_Carpani", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı", "Kişi Sayısı"]
+        X_m = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Tabla_Carpani", "Kilitleme_Carpani", "Uzunluk_Carpani", "Normalize_Mesafe", "Ortam_Montaj_Çarpanı"]
         rf_net, _, sc, _, metrik_m = yapay_zeka_egit(df_m, X_m, birim="gun")
         if rf_net:
             col1, col2 = st.columns(2)
@@ -768,7 +751,7 @@ with tab3:
         else: st.warning("Yeterli veri yok.")
 
     elif yz_departman == "Elektrik Atölyesi" and not df_e.empty:
-        X_e = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Uzunluk_Carpani", "Normalize_Durak", "Kilitleme_Carpani", "Sıfırlama_Carpani", "Tabla Kapısı_Carpani", "Yavaşlama_Carpani", "Buton Tipi_Carpani", "İkaz Lambaları_Carpani", "PLC_Carpani", "PLC_Model_Carpani", "Kişi Sayısı"]
+        X_e = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Uzunluk_Carpani", "Normalize_Durak", "Kilitleme_Carpani", "Sıfırlama_Carpani", "Tabla Kapısı_Carpani", "Yavaşlama_Carpani", "Buton Tipi_Carpani", "İkaz Lambaları_Carpani", "PLC_Carpani", "PLC_Model_Carpani"]
         rf_net, _, sc, _, metrik_e = yapay_zeka_egit(df_e, X_e, birim="saat")
         if rf_net:
             col1, col2 = st.columns(2)
@@ -792,10 +775,10 @@ with tab3:
         if not df_k.empty and not df_e.empty:
             st.info("💡 **Bilgi:** Bu tahminleme modeli, önce Kaynak/İmalat yapay zekasını çalıştırır, ardından Elektrik montaj süresini hesaplar. Elektrik saatini mesai gününe (8 saat) çevirip toplam sevke çıkma süresini (iş günü bazında) verir.")
             
-            X_k = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Teknik", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani", "Uzunluk_Carpani", "Kişi Sayısı"]
+            X_k = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Normalize_Teknik", "Çelik Çarpanı", "Tabla_Carpani", "Kilitleme_Carpani", "Uzunluk_Carpani"]
             rf_net_k, _, sc_k, _, _ = yapay_zeka_egit(df_k, X_k, birim="gun")
             
-            X_e = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Uzunluk_Carpani", "Normalize_Durak", "Kilitleme_Carpani", "Sıfırlama_Carpani", "Tabla Kapısı_Carpani", "Yavaşlama_Carpani", "Buton Tipi_Carpani", "İkaz Lambaları_Carpani", "PLC_Carpani", "PLC_Model_Carpani", "Kişi Sayısı"]
+            X_e = ["Zorluk Katsayısı", "Normalize_Kapasite", "Normalize_Ebat", "Uzunluk_Carpani", "Normalize_Durak", "Kilitleme_Carpani", "Sıfırlama_Carpani", "Tabla Kapısı_Carpani", "Yavaşlama_Carpani", "Buton Tipi_Carpani", "İkaz Lambaları_Carpani", "PLC_Carpani", "PLC_Model_Carpani"]
             rf_net_e, _, sc_e, _, _ = yapay_zeka_egit(df_e, X_e, birim="saat")
             
             if rf_net_k and rf_net_e:
